@@ -25,6 +25,8 @@ export interface Connection {
   queryTimeoutSeconds: number;
   /** Blocks every write statement on this connection, regardless of role. */
   readOnly: boolean;
+  cassandraConsistency: string;
+  cassandraPageSize: number;
   nodes: ConnectionNode[];
   nodePolicy?: "primary_only" | "secondary_only" | "user_selectable";
   defaultNodeRole?: "primary" | "secondary";
@@ -68,6 +70,8 @@ export interface ConnectionInput {
   password: string;
   queryTimeoutSeconds: number;
   readOnly: boolean;
+  cassandraConsistency: string;
+  cassandraPageSize: number;
   nodes: ConnectionNodeInput[];
   // SSH tunnel. sshHost "" turns it off. The credentials are write-only.
   sshHost?: string;

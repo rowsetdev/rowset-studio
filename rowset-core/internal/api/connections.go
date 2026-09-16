@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"sort"
 	"strconv"
@@ -43,15 +44,17 @@ type connectionInput struct {
 	Nodes               *[]nodeInput `json:"nodes"`
 	// SSH tunnel. sshHost "" turns it off. The credential fields are
 	// write-only: nil keeps what is stored, "" clears it.
-	SSHHost       *string `json:"sshHost"`
-	SSHPort       *int    `json:"sshPort"`
-	SSHUser       *string `json:"sshUser"`
-	SSHAuthMethod *string `json:"sshAuthMethod"`
-	SSHKnownHost  *string `json:"sshKnownHost"`
-	SSHPassword   *string `json:"sshPassword"`
-	SSHPrivateKey *string `json:"sshPrivateKey"`
-	SSHPassphrase *string `json:"sshPassphrase"`
-	ReadOnly      *bool   `json:"readOnly"`
+	SSHHost              *string `json:"sshHost"`
+	SSHPort              *int    `json:"sshPort"`
+	SSHUser              *string `json:"sshUser"`
+	SSHAuthMethod        *string `json:"sshAuthMethod"`
+	SSHKnownHost         *string `json:"sshKnownHost"`
+	SSHPassword          *string `json:"sshPassword"`
+	SSHPrivateKey        *string `json:"sshPrivateKey"`
+	SSHPassphrase        *string `json:"sshPassphrase"`
+	ReadOnly             *bool   `json:"readOnly"`
+	CassandraConsistency *string `json:"cassandraConsistency"`
+	CassandraPageSize    *int    `json:"cassandraPageSize"`
 }
 type nodeInput struct {
 	ID   *string `json:"id"`
@@ -102,7 +105,7 @@ func (s *Server) connectionJSON(r *http.Request, connection domain.Connection, i
 	if connection.Alias != nil {
 		alias = *connection.Alias
 	}
-	result := map[string]any{"id": connection.ID, "name": connection.Name, "alias": alias, "engine": connection.Engine, "host": connection.Host, "port": connection.Port, "database": connection.Database, "environment": connection.Environment, "tlsRequired": connection.EffectiveTLSMode() != engine.TLSDisable, "tlsMode": connection.EffectiveTLSMode(), "tlsServerName": connection.TLSServerName, "tlsCaPem": connection.TLSCAPEM, "tlsClientCertPem": connection.TLSClientCertPEM, "tlsClientKeyConfigured": connection.TLSClientKeySecret != "", "connectionUsername": connection.ConnectionUsername, "techUsername": connection.ConnectionUsername, "createdAt": connection.CreatedAt, "queryTimeoutSeconds": connection.QueryTimeoutSeconds, "readOnly": connection.ReadOnly, "sshHost": connection.SSHHost, "sshPort": connection.SSHPort, "sshUser": connection.SSHUser, "sshAuthMethod": connection.SSHAuthMethod, "sshKnownHost": connection.SSHKnownHost, "sshConfigured": connection.SSHSecretID != "", "nodes": nodes}
+	result := map[string]any{"id": connection.ID, "name": connection.Name, "alias": alias, "engine": connection.Engine, "host": connection.Host, "port": connection.Port, "database": connection.Database, "environment": connection.Environment, "tlsRequired": connection.EffectiveTLSMode() != engine.TLSDisable, "tlsMode": connection.EffectiveTLSMode(), "tlsServerName": connection.TLSServerName, "tlsCaPem": connection.TLSCAPEM, "tlsClientCertPem": connection.TLSClientCertPEM, "tlsClientKeyConfigured": connection.TLSClientKeySecret != "", "connectionUsername": connection.ConnectionUsername, "techUsername": connection.ConnectionUsername, "createdAt": connection.CreatedAt, "queryTimeoutSeconds": connection.QueryTimeoutSeconds, "readOnly": connection.ReadOnly, "cassandraConsistency": connection.CassandraConsistency, "cassandraPageSize": connection.CassandraPageSize, "sshHost": connection.SSHHost, "sshPort": connection.SSHPort, "sshUser": connection.SSHUser, "sshAuthMethod": connection.SSHAuthMethod, "sshKnownHost": connection.SSHKnownHost, "sshConfigured": connection.SSHSecretID != "", "nodes": nodes}
 	for _, detail := range s.connectionDetails {
 		detail(r.Context(), connection, result)
 	}
@@ -132,7 +135,7 @@ func (s *Server) createConnection(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if s.config.Shared && engine.AdditionalEngine(input.Engine) {
+	if s.config.Shared && engine.AdditionalEngine(input.Engine) && input.Engine != "cassandra" {
 		writeError(w, 400, "BAD_REQUEST", "additional engines are currently available in personal workspaces only")
 		return
 	}
@@ -217,7 +220,7 @@ func (s *Server) updateConnection(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if s.config.Shared && engine.AdditionalEngine(input.Engine) {
+	if s.config.Shared && engine.AdditionalEngine(input.Engine) && input.Engine != "cassandra" {
 		writeError(w, 400, "BAD_REQUEST", "additional engines are currently available in personal workspaces only")
 		return
 	}
@@ -342,7 +345,7 @@ func (s *Server) engineConnection(r *http.Request, connection domain.Connection,
 }
 
 func (s *Server) engineConnectionAt(ctx context.Context, connection domain.Connection, database, host string, port int) (engine.Connection, error) {
-	if s.config.Shared && engine.AdditionalEngine(connection.Engine) {
+	if s.config.Shared && engine.AdditionalEngine(connection.Engine) && connection.Engine != "cassandra" {
 		return engine.Connection{}, fmt.Errorf("additional engines are currently available in personal workspaces only")
 	}
 	if engine.FileEngine(connection.Engine) && database != "" && database != connection.Database {
@@ -375,7 +378,16 @@ func (s *Server) engineConnectionAt(ctx context.Context, connection domain.Conne
 	if err != nil {
 		return engine.Connection{}, err
 	}
-	return engine.Connection{ID: connection.ID, Engine: connection.Engine, Host: host, Port: port, Database: database, Username: connection.ConnectionUsername, Password: string(plaintext), TLS: settings, PoolSize: s.poolSize(connection.Engine), SSH: sshConfig}, nil
+	contacts := []string{host}
+	if connection.Engine == "cassandra" && sshConfig.Host == "" {
+		if nodes, nodeErr := s.store.ListConnectionNodes(ctx, connection.ID); nodeErr == nil && len(nodes) > 0 {
+			contacts = contacts[:0]
+			for _, node := range nodes {
+				contacts = append(contacts, net.JoinHostPort(node.Host, strconv.Itoa(node.Port)))
+			}
+		}
+	}
+	return engine.Connection{ID: connection.ID, Engine: connection.Engine, Host: host, Port: port, Database: database, Username: connection.ConnectionUsername, Password: string(plaintext), TLS: settings, PoolSize: s.poolSize(connection.Engine), SSH: sshConfig, ContactPoints: contacts, CassandraConsistency: connection.CassandraConsistency, CassandraPageSize: connection.CassandraPageSize}, nil
 }
 
 func (s *Server) sshConfigForConnection(ctx context.Context, connection domain.Connection) (engine.SSHConfig, error) {
@@ -803,7 +815,7 @@ func normalizeConnectionInput(input connectionInput, existing *domain.Connection
 	if input.Engine == "mongodb" && input.ConnectionUsername == "" && input.Password != "" {
 		return domain.Connection{}, nil, "a MongoDB password requires a username"
 	}
-	if engine.AdditionalEngine(input.Engine) && input.Nodes != nil && len(*input.Nodes) > 1 {
+	if engine.AdditionalEngine(input.Engine) && input.Engine != "cassandra" && input.Nodes != nil && len(*input.Nodes) > 1 {
 		return domain.Connection{}, nil, "additional engines currently support a single configured endpoint"
 	}
 	if input.Name == "" || input.Engine == "" || input.Host == "" || (input.ConnectionUsername == "" && input.Engine != "mongodb" && input.Engine != "redis" && input.Engine != "valkey") || input.Port < 1 || input.Port > 65535 || (existing == nil && input.Password == "" && !engine.AdditionalEngine(input.Engine)) {
@@ -834,10 +846,17 @@ func normalizeConnectionInput(input connectionInput, existing *domain.Connection
 	tlsMode, serverName, caPEM, clientCert, clientKeySecret := engine.TLSVerifyFull, "", "", "", ""
 	timeout := int64(600)
 	readOnly := false
+	cassandraConsistency, cassandraPageSize := "QUORUM", 1000
 	connectionID, createdAt := id.New(), store.NowString()
 	if existing != nil {
 		connectionID, createdAt, timeout, readOnly = existing.ID, existing.CreatedAt, existing.QueryTimeoutSeconds, existing.ReadOnly
 		tlsMode, serverName, caPEM, clientCert, clientKeySecret = existing.EffectiveTLSMode(), existing.TLSServerName, existing.TLSCAPEM, existing.TLSClientCertPEM, existing.TLSClientKeySecret
+		if existing.CassandraConsistency != "" {
+			cassandraConsistency = existing.CassandraConsistency
+		}
+		if existing.CassandraPageSize > 0 {
+			cassandraPageSize = existing.CassandraPageSize
+		}
 	}
 	if input.TLSMode != nil {
 		mode, err := engine.NormalizeTLSMode(*input.TLSMode)
@@ -876,7 +895,20 @@ func normalizeConnectionInput(input connectionInput, existing *domain.Connection
 	if input.ReadOnly != nil {
 		readOnly = *input.ReadOnly
 	}
-	connection := domain.Connection{ID: connectionID, OrgID: orgID, Name: input.Name, Alias: alias, Engine: input.Engine, Host: input.Host, Port: input.Port, Database: database, Environment: environment, TLSRequired: tlsMode != engine.TLSDisable, TLSMode: tlsMode, TLSServerName: serverName, TLSCAPEM: caPEM, TLSClientCertPEM: clientCert, TLSClientKeySecret: clientKeySecret, ConnectionUsername: input.ConnectionUsername, CreatedAt: createdAt, QueryTimeoutSeconds: timeout, ReadOnly: readOnly}
+	if input.CassandraConsistency != nil {
+		cassandraConsistency = strings.ToUpper(strings.TrimSpace(*input.CassandraConsistency))
+	}
+	allowedConsistency := map[string]bool{"ANY": true, "ONE": true, "TWO": true, "THREE": true, "QUORUM": true, "ALL": true, "LOCAL_QUORUM": true, "EACH_QUORUM": true, "LOCAL_ONE": true}
+	if !allowedConsistency[cassandraConsistency] {
+		return domain.Connection{}, nil, "unsupported Cassandra consistency"
+	}
+	if input.CassandraPageSize != nil {
+		cassandraPageSize = *input.CassandraPageSize
+	}
+	if cassandraPageSize < 1 || cassandraPageSize > 10000 {
+		return domain.Connection{}, nil, "cassandraPageSize must be between 1 and 10000"
+	}
+	connection := domain.Connection{ID: connectionID, OrgID: orgID, Name: input.Name, Alias: alias, Engine: input.Engine, Host: input.Host, Port: input.Port, Database: database, Environment: environment, TLSRequired: tlsMode != engine.TLSDisable, TLSMode: tlsMode, TLSServerName: serverName, TLSCAPEM: caPEM, TLSClientCertPEM: clientCert, TLSClientKeySecret: clientKeySecret, ConnectionUsername: input.ConnectionUsername, CreatedAt: createdAt, QueryTimeoutSeconds: timeout, ReadOnly: readOnly, CassandraConsistency: cassandraConsistency, CassandraPageSize: cassandraPageSize}
 	if existing != nil {
 		connection.SSHHost, connection.SSHPort, connection.SSHUser = existing.SSHHost, existing.SSHPort, existing.SSHUser
 		connection.SSHAuthMethod, connection.SSHKnownHost = existing.SSHAuthMethod, existing.SSHKnownHost

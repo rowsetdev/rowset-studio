@@ -57,6 +57,8 @@ export default function ConnectionForm({
           password: "",
           queryTimeoutSeconds: connection.queryTimeoutSeconds,
           readOnly: connection.readOnly,
+          cassandraConsistency: connection.cassandraConsistency || "QUORUM",
+          cassandraPageSize: connection.cassandraPageSize || 1000,
           nodes: connection.nodes.map(({ id, name, host, port }) => ({ id, name, host, port })),
           sshHost: connection.sshHost ?? "",
           sshPort: connection.sshPort || 22,
@@ -80,6 +82,8 @@ export default function ConnectionForm({
           password: "",
           queryTimeoutSeconds: 600,
           readOnly: false,
+          cassandraConsistency: "QUORUM",
+          cassandraPageSize: 1000,
           nodes: [{ name: "node-1", host: "localhost", port: 5432 }],
           sshHost: "",
           sshPort: 22,
@@ -90,7 +94,7 @@ export default function ConnectionForm({
   );
   const [error, setError] = useState("");
   const fileEngine = form.engine === "sqlite" || form.engine === "duckdb";
-  const singleEndpointEngines: Engine[] = ["clickhouse", "mongodb", "redis", "valkey", "cassandra", "elasticsearch", "snowflake"];
+  const singleEndpointEngines: Engine[] = ["clickhouse", "mongodb", "redis", "valkey", "elasticsearch", "snowflake"];
   const singleEndpoint = fileEngine || singleEndpointEngines.includes(form.engine);
   const optionalPassword = fileEngine || form.engine === "clickhouse" || form.engine === "mongodb" || form.engine === "redis" || form.engine === "valkey";
   const pending = create.isPending || update.isPending;
@@ -143,7 +147,7 @@ export default function ConnectionForm({
     try {
       const first = form.nodes[0];
       const base = first ? { ...form, host: first.host, port: first.port } : { ...form };
-      if (!sshEnabled || fileEngine || ["mongodb", "redis", "valkey", "cassandra", "elasticsearch", "snowflake"].includes(form.engine)) { base.sshHost = ""; }
+      if (!sshEnabled || fileEngine || ["mongodb", "redis", "valkey", "elasticsearch", "snowflake"].includes(form.engine)) { base.sshHost = ""; }
       if (fileEngine) { base.nodes = []; base.tlsMode = "disable"; base.tlsCaPem = ""; base.tlsServerName = ""; base.tlsClientCertPem = ""; base.tlsClientKey = ""; }
       const input = { ...base, ...extra };
       if (connection) await update.mutateAsync({ id: connection.id, input });
@@ -193,7 +197,7 @@ export default function ConnectionForm({
             {instance?.mode === "personal" && <option value="mongodb">MongoDB</option>}
             {instance?.mode === "personal" && <option value="redis">Redis</option>}
             {instance?.mode === "personal" && <option value="valkey">Valkey</option>}
-            {instance?.mode === "personal" && <option value="cassandra">Cassandra</option>}
+            <option value="cassandra">Cassandra</option>
             {instance?.mode === "personal" && <option value="elasticsearch">Elasticsearch</option>}
           </Select>
         </Field>
@@ -310,6 +314,16 @@ export default function ConnectionForm({
               required
             />
           </Field>
+          {form.engine === "cassandra" && <>
+            <Field label="Consistency">
+              <Select value={form.cassandraConsistency} onChange={(e) => set("cassandraConsistency", e.target.value)}>
+                {['LOCAL_ONE', 'ONE', 'TWO', 'THREE', 'LOCAL_QUORUM', 'QUORUM', 'EACH_QUORUM', 'ALL', 'ANY'].map(value => <option key={value} value={value}>{value}</option>)}
+              </Select>
+            </Field>
+            <Field label="Page size">
+              <Input type="number" min={1} max={10000} value={form.cassandraPageSize} onChange={(e) => set("cassandraPageSize", Number(e.target.value))} required />
+            </Field>
+          </>}
         </div>
         {!fileEngine && form.tlsMode !== "disable" && (
           <details className="rounded border border-slate-200 p-2 dark:border-slate-800" open={Boolean(form.tlsCaPem || form.tlsClientCertPem || form.tlsServerName)}>
@@ -342,7 +356,7 @@ export default function ConnectionForm({
             </div>
           </details>
         )}
-        {!fileEngine && !["mongodb", "redis", "valkey", "cassandra", "elasticsearch", "snowflake"].includes(form.engine) && <details className="rounded border border-slate-200 p-2 dark:border-slate-800" open={sshEnabled}>
+        {!fileEngine && !["mongodb", "redis", "valkey", "elasticsearch", "snowflake"].includes(form.engine) && <details className="rounded border border-slate-200 p-2 dark:border-slate-800" open={sshEnabled}>
           <summary className="cursor-pointer text-xs text-slate-600 dark:text-slate-300">SSH tunnel (optional)</summary>
           <div className="mt-2 space-y-3">
             <label className="flex items-center gap-2 text-[12px] text-slate-600 dark:text-slate-300">
@@ -402,7 +416,7 @@ export default function ConnectionForm({
         {form.engine === "cockroachdb" && <p className="text-[12px] text-slate-500">CockroachDB is queried through its PostgreSQL wire protocol; SQL, schema browsing and HA nodes all work the same way they do for PostgreSQL.</p>}
         {form.engine === "redis" && <p className="text-[12px] text-slate-500">Browse keys by pattern (string, hash, list, set, zset, stream). The Database field is a numeric index (0-15). Writes and SSH are not supported yet. Leave the username blank for an unauthenticated server.</p>}
         {form.engine === "valkey" && <p className="text-[12px] text-slate-500">Valkey speaks the same protocol as Redis, so it works the same way here: browse keys by pattern, the Database field is a numeric index (0-15), writes and SSH are not supported yet. Leave the username blank for an unauthenticated server.</p>}
-        {form.engine === "cassandra" && <p className="text-[12px] text-slate-500">Runs read-only CQL SELECT statements against a keyspace (set it in the Database field). Writes, DDL and SSH are not supported yet.</p>}
+        {form.engine === "cassandra" && <p className="text-[12px] text-slate-500">Runs policy-governed CQL reads, writes, DDL and batches. Add contact points with HA nodes; SSH, TLS, consistency and paging are supported.</p>}
         {form.engine === "elasticsearch" && <p className="text-[12px] text-slate-500">Searches one index at a time with a JSON query body. Writes, aggregations across indices and SSH are not supported yet.</p>}
         {form.engine === "snowflake" && <p className="text-[12px] text-slate-500">Enter your account identifier as the server (e.g. myorg-myaccount). The default warehouse and role on your user are used; SSH is not supported.</p>}
         <ErrorText>{error}</ErrorText>

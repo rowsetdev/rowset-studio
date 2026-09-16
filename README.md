@@ -46,12 +46,12 @@ encrypted in a local SQLite database.
 | <img src="rowset-studio/src/assets/engines/clickhouse.svg" height="18" valign="middle"> ClickHouse | Native TCP: 9440 with TLS, 9000 without | SQL, databases, tables/views, DDL, CSV/JSON export |
 | <img src="rowset-studio/src/assets/engines/mongodb.svg" height="18" valign="middle"> MongoDB | Host/port; `authSource=admin` | Compass-style filter/project/sort/skip/limit query bar synced with `db.collection.find()`, read-only |
 | <img src="rowset-studio/src/assets/engines/redis.svg" height="18" valign="middle"> Redis | Host/port | Pattern/type scan bar, keys grouped by type as pseudo-tables |
-| <img src="rowset-studio/src/assets/engines/cassandra.svg" height="18" valign="middle"> Cassandra | Host/port, keyspace | CQL editor, keyspace/table browsing |
+| <img src="rowset-studio/src/assets/engines/cassandra.svg" height="18" valign="middle"> Cassandra | Contact points, keyspace, TLS/SSH, consistency/paging | Governed CQL reads/writes/DDL/batches, schema/DDL, CSV import/export |
 | <img src="rowset-studio/src/assets/engines/elasticsearch.svg" height="18" valign="middle"> Elasticsearch | HTTP API host/port | Index/query/size search bar, index mapping browsing |
 
 CockroachDB and Snowflake behave like the four original SQL engines (row
-editing, CSV import excepted for Snowflake). MongoDB, Redis, Cassandra and
-Elasticsearch are read-only in this release, with a query bar tailored to
+editing, CSV import excepted for Snowflake). MongoDB, Redis and
+Elasticsearch are read-only in this release; Cassandra uses governed CQL, with a query bar tailored to
 each — see [Additional databases](#additional-databases-and-schema-comparison)
 below for exact limits.
 
@@ -110,12 +110,12 @@ migration tool: CHECK constraints, complete index/FK definitions, views and
 routines need separate DDL review. Failed metadata reads are shown and
 disable drafts.
 
-MongoDB, Redis, Cassandra and Elasticsearch are read-only: aggregation
+MongoDB, Redis and Elasticsearch are read-only: aggregation
 pipelines, transactions, writes and SSH tunnels are not yet supported for
 them, and index/primary-key/foreign-key metadata is not loaded for any
 non-`database/sql` engine (SQLite, DuckDB, ClickHouse and these four).
-Inline grid editing, CSV import and SQL INSERT export remain available only
-for the SQL engines. Query each engine's own tools directly for operations
+Inline grid editing remains available only for the SQL engines. Cassandra
+supports CSV import in logged batches and CSV/JSON export. Query each engine's own tools directly for operations
 Rowset doesn't cover yet.
 
 Native `build-local-binary.sh` builds include DuckDB and require a working

@@ -12,6 +12,9 @@ import (
 // definition for views, routines and triggers, and a CREATE TABLE built from
 // the catalog where the engine has no such function.
 func (m *Manager) ObjectDDL(ctx context.Context, connection Connection, kind, schemaName, name string) (string, error) {
+	if connection.Engine == "cassandra" {
+		return cassandraDDL(ctx, connection, kind, schemaName, name)
+	}
 	db, err := m.database(connection)
 	if err != nil {
 		return "", err

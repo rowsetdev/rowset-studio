@@ -37,7 +37,10 @@ type Connection struct {
 	TLS                          TLSSettings
 	PoolSize                     int
 	// SSH, when enabled, is an SSH server the database is reached through.
-	SSH SSHConfig
+	SSH                  SSHConfig
+	ContactPoints        []string
+	CassandraConsistency string
+	CassandraPageSize    int
 }
 type Result struct {
 	Columns      []string `json:"columns,omitempty"`

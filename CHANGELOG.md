@@ -5,6 +5,18 @@ and `scripts/package-macos.sh` stamp it into Studio (sidebar), the `rowset`
 executable and the macOS app. Every change set bumps the patch version and adds
 an entry here.
 
+## 0.0.86 — 2026-09-16
+
+- Expanded Cassandra from personal read-only queries to policy-governed CQL
+  reads, writes, DDL and batches in personal and shared workspaces, with audit
+  logging, read-only enforcement and automatic schema cache invalidation.
+- Added Cassandra contact points, consistency and page-size settings, plus TLS
+  and SSH tunnel support.
+- Added Cassandra table DDL viewing, CSV/JSON export and typed CSV import in
+  bounded logged batches, with explicit partial-failure behavior.
+- Added CQL-aware classification and automated/live integration coverage for
+  comments, strings, multi-statements, batches, writes, DDL and imports.
+
 ## 0.0.85 — 2026-09-16
 
 - Fixed sidebar navigation occasionally leaving the SQL editor visible after

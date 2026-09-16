@@ -48,3 +48,24 @@ func TestUnclassifiedDenialIsOptIn(t *testing.T) {
 		t.Fatalf("enabled policy did not deny statement: %#v", got)
 	}
 }
+
+func TestCassandraStatementsUseGuardrails(t *testing.T) {
+	for _, query := range []string{"UPDATE users SET name='x'", "BEGIN BATCH INSERT INTO users (id) VALUES (1); UPDATE users SET name='x'; APPLY BATCH;"} {
+		info, err := sqlguard.ParseCQL(query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		decision := Evaluate(Input{Statement: info, Disabled: map[string]bool{}, Enabled: map[string]bool{}})
+		if decision.Effect != Deny || decision.PolicyID != "deny_update_without_where" {
+			t.Fatalf("%q: %+v", query, decision)
+		}
+	}
+	info, err := sqlguard.ParseCQL("INSERT INTO users (id) VALUES (1)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	decision := Evaluate(Input{Statement: info, ReadOnly: true, Disabled: map[string]bool{}, Enabled: map[string]bool{}})
+	if decision.Effect != Deny || decision.PolicyID != "read_only_role" {
+		t.Fatalf("read-only insert: %+v", decision)
+	}
+}

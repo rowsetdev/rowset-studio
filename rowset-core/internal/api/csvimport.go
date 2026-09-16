@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/dbaopsio/rowset-studio/rowset-core/internal/domain"
 	"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine"
 	"github.com/dbaopsio/rowset-studio/rowset-core/internal/id"
 	"github.com/dbaopsio/rowset-studio/rowset-core/internal/policy"
@@ -21,10 +22,11 @@ import (
 )
 
 const (
-	importMaxBytes     = 256 << 20
-	importBatchRows    = 500
-	importBatchBytes   = 512 << 10
-	importUploadMaxAge = time.Hour
+	importMaxBytes           = 256 << 20
+	importBatchRows          = 500
+	cassandraImportBatchRows = 50
+	importBatchBytes         = 512 << 10
+	importUploadMaxAge       = time.Hour
 )
 
 // csvUpload is a CSV file being uploaded in chunks before it is imported in
@@ -76,7 +78,7 @@ func (s *Server) startImport(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if engine.AdditionalEngine(connection.Engine) {
+	if engine.AdditionalEngine(connection.Engine) && connection.Engine != "cassandra" {
 		writeError(w, 400, "UNSUPPORTED", "CSV import is not available for this engine yet")
 		return
 	}
@@ -216,6 +218,10 @@ func (s *Server) runImport(w http.ResponseWriter, r *http.Request) {
 		writePolicyError(w, http.StatusForbidden, "POLICY_DENIED", decision, nil)
 		return
 	}
+	if connection.Engine == "cassandra" {
+		s.runCassandraImport(w, r, connection, input, item, policyTimeout, shape, hash)
+		return
+	}
 	primary := "primary"
 	target, _, err := s.routedEngineConnection(r.Context(), identity, connection, strings.TrimSpace(input.Database), &primary, &info)
 	if err != nil {
@@ -344,6 +350,98 @@ func (s *Server) runImport(w http.ResponseWriter, r *http.Request) {
 	duration := elapsedMilliseconds(started)
 	s.recordActivity(r, connection.ID, fmt.Sprintf("-- CSV import: %d rows\n%s", rows, shape), "success", rows, duration, normalized, hash, auditMeta{decision: "allow", command: true})
 	writeJSON(w, http.StatusOK, map[string]any{"rows": rows, "durationMs": duration})
+}
+
+func (s *Server) runCassandraImport(w http.ResponseWriter, r *http.Request, connection domain.Connection, input importInput, item *csvUpload, timeout int, statement, hash string) {
+	delimiter, _ := importDelimiter(input.Delimiter)
+	file, err := os.Open(item.path)
+	if err != nil {
+		writeError(w, 500, "INTERNAL", "import file unavailable")
+		return
+	}
+	defer file.Close()
+	keyspace := input.Schema
+	if keyspace == "" {
+		keyspace = input.Database
+	}
+	if keyspace == "" {
+		keyspace = connection.Database
+	}
+	target, err := s.engineConnection(r, connection, keyspace)
+	if err != nil {
+		writeError(w, 502, "EXEC_ERROR", err.Error())
+		return
+	}
+	columns := make([]string, len(input.Columns))
+	for i, column := range input.Columns {
+		columns[i] = strings.TrimSpace(column.Target)
+	}
+	reader := csv.NewReader(bufio.NewReader(file))
+	reader.Comma, reader.FieldsPerRecord, reader.LazyQuotes = delimiter, -1, true
+	ctx, cancel := withConnectionTimeout(r, connection, timeout, 30*time.Minute)
+	defer cancel()
+	started, rows := time.Now(), int64(0)
+	first := true
+	batch := make([][]any, 0, cassandraImportBatchRows)
+	flush := func() error {
+		if len(batch) == 0 {
+			return nil
+		}
+		err := s.engines.CassandraImport(ctx, target, keyspace, input.Table, columns, batch)
+		batch = batch[:0]
+		return err
+	}
+	for {
+		record, readErr := reader.Read()
+		if errors.Is(readErr, io.EOF) {
+			break
+		}
+		if readErr != nil {
+			err = readErr
+			break
+		}
+		if first && input.Header {
+			first = false
+			continue
+		}
+		first = false
+		values := make([]any, len(input.Columns))
+		valid := true
+		for i, column := range input.Columns {
+			if column.Source >= len(record) {
+				valid = false
+				break
+			}
+			value := record[column.Source]
+			if input.NullEmpty && value == "" {
+				values[i] = nil
+			} else {
+				values[i] = value
+			}
+		}
+		if !valid {
+			err = fmt.Errorf("CSV row %d has too few columns", rows+1)
+			break
+		}
+		batch = append(batch, values)
+		rows++
+		if len(batch) >= cassandraImportBatchRows {
+			if err = flush(); err != nil {
+				break
+			}
+		}
+	}
+	if err == nil {
+		err = flush()
+	}
+	duration := time.Since(started).Milliseconds()
+	if err != nil {
+		s.recordActivity(r, connection.ID, statement, "error", rows, duration, "", hash, auditMeta{decision: "allow", errorMessage: err.Error()})
+		writeError(w, 502, "EXEC_ERROR", err.Error())
+		return
+	}
+	s.recordActivity(r, connection.ID, statement, "success", rows, duration, "", hash, auditMeta{decision: "allow"})
+	writeJSON(w, 200, map[string]any{"rowsAffected": rows, "durationMs": duration})
 }
 
 // importColumnTypesSQL lists the data type of each column of the target table.

@@ -360,7 +360,7 @@ function TableItem({ engine, schemaName, table, triggers = [], connectionId, dat
   const quotedName = [schemaName, table.name].map(n => quoteIdentifier(engine, n)).join(".");
   // These engines have a query editor now, but no DDL viewer or export path
   // yet (both use the pooled SQL connection these engines don't have).
-  const noDdlOrExport = ["redis", "valkey", "cassandra", "elasticsearch"].includes(engine);
+  const noDdlOrExport = ["redis", "valkey", "elasticsearch"].includes(engine);
   const copyName = () => {
     navigator.clipboard.writeText(quotedName)
       .then(() => setCopyState("copied"), () => setCopyState("failed"))
@@ -406,14 +406,14 @@ function TableItem({ engine, schemaName, table, triggers = [], connectionId, dat
               { label: "Show DDL", onSelect: () => setShowingDDL(true) },
               { label: "Export as CSV", onSelect: () => download("csv"), disabled: exportState.status === "running" },
               { label: "Export as JSON", onSelect: () => download("json"), disabled: exportState.status === "running" },
-              { label: "Export as SQL (INSERT)", onSelect: () => download("sql"), disabled: exportState.status === "running" || ["sqlite", "duckdb", "clickhouse"].includes(engine) },
+              { label: "Export as SQL (INSERT)", onSelect: () => download("sql"), disabled: exportState.status === "running" || ["sqlite", "duckdb", "clickhouse", "cassandra"].includes(engine) },
               ...(icon === "table" && !["sqlite", "duckdb", "clickhouse"].includes(engine) ? [{ label: "Import CSV…", onSelect: () => setImporting(true) }] : []),
             ]}
           />}
         </span>
       </div>
       {showingDDL && <DDLViewer engine={engine} connectionId={connectionId} database={database} schemaName={schemaName} kind={icon === "table" ? "table" : "view"} name={table.name} onClose={() => setShowingDDL(false)} />}
-      {importing && <CsvImportDialog connectionId={connectionId} database={database} schemaName={schemaName} table={table} onClose={() => setImporting(false)} />}
+      {importing && <CsvImportDialog connectionId={connectionId} database={database} schemaName={schemaName} table={table} engine={engine} onClose={() => setImporting(false)} />}
       {open && engine !== "mongodb" && (
         <ul className="ml-[11px] border-l border-slate-200/80 pl-2.5 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
           {(table.columns ?? []).map((c) => (

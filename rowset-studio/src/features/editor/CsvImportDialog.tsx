@@ -17,7 +17,7 @@ function fileSize(bytes: number) {
 
 // Imports a CSV file into an existing table. The file uploads in chunks and
 // is inserted in one transaction, so either every row lands or none does.
-export default function CsvImportDialog({ connectionId, database, schemaName, table, onClose }: { connectionId: string; database?: string; schemaName: string; table: TableInfo; onClose: () => void }) {
+export default function CsvImportDialog({ connectionId, database, schemaName, table, engine, onClose }: { connectionId: string; database?: string; schemaName: string; table: TableInfo; engine?: string; onClose: () => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [text, setText] = useState("");
   const [truncated, setTruncated] = useState(false);
@@ -122,7 +122,7 @@ export default function CsvImportDialog({ connectionId, database, schemaName, ta
     <Modal title="Import CSV" onClose={() => !busy && onClose()} size="xl" closeOnBackdrop={false}>
       <div className="space-y-4 text-[13px]">
         <p className="-mt-2 text-[12px] text-slate-500">
-          Into <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-slate-700 dark:bg-slate-800 dark:text-slate-200">{target}</code>. Rows are added in one transaction: all of them or none.
+          Into <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-slate-700 dark:bg-slate-800 dark:text-slate-200">{target}</code>. {engine === "cassandra" ? "Rows are written in logged batches of up to 50; completed batches are not rolled back if a later batch fails." : "Rows are added in one transaction: all of them or none."}
         </p>
 
         {!file ? (
@@ -204,7 +204,7 @@ export default function CsvImportDialog({ connectionId, database, schemaName, ta
                   <div className="h-1.5 w-40 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
                     <div className={`h-full rounded-full bg-brand-500 transition-all ${phase === "importing" ? "animate-pulse" : ""}`} style={{ width: `${phase === "importing" ? 100 : progress}%` }} />
                   </div>
-                  <span className="text-[12px] text-slate-500">{phase === "uploading" ? `Uploading ${progress}%` : "Importing in one transaction…"}</span>
+                  <span className="text-[12px] text-slate-500">{phase === "uploading" ? `Uploading ${progress}%` : engine === "cassandra" ? "Importing in logged batches…" : "Importing in one transaction…"}</span>
                 </div>
               ) : <span className="flex-1" />}
               <button type="button" onClick={onClose} disabled={busy} className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-3 text-[13px] font-medium text-slate-600 transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800">Cancel</button>

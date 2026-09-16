@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/gocql/gocql"
 	goredis "github.com/redis/go-redis/v9"
 )
 
@@ -148,23 +150,23 @@ func TestLiveCassandra(t *testing.T) {
 	if err := cassandraTest(ctx, c); err != nil {
 		t.Fatal(err)
 	}
-	session, err := cassandraSession(c, "")
+	session, cleanup, err := cassandraSession(ctx, c, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := session.Query("CREATE KEYSPACE IF NOT EXISTS rowset_probe WITH replication = {'class':'SimpleStrategy','replication_factor':1}").WithContext(ctx).Exec(); err != nil {
-		session.Close()
+		cleanup()
 		t.Fatal(err)
 	}
 	if err := session.Query("CREATE TABLE IF NOT EXISTS rowset_probe.items (id int PRIMARY KEY, label text)").WithContext(ctx).Exec(); err != nil {
-		session.Close()
+		cleanup()
 		t.Fatal(err)
 	}
 	if err := session.Query("INSERT INTO rowset_probe.items (id, label) VALUES (1, 'hello')").WithContext(ctx).Exec(); err != nil {
-		session.Close()
+		cleanup()
 		t.Fatal(err)
 	}
-	session.Close()
+	cleanup()
 	dbs, err := cassandraDatabases(ctx, c)
 	if err != nil {
 		t.Fatal(err)
@@ -191,6 +193,47 @@ func TestLiveCassandra(t *testing.T) {
 	}
 	if len(result.Rows) != 1 {
 		t.Fatalf("rows: %#v", result)
+	}
+	manager := NewManager()
+	for _, query := range []string{
+		"INSERT INTO items (id, label) VALUES (2, 'write')",
+		"UPDATE items SET label='updated' WHERE id=2",
+		"BEGIN UNLOGGED BATCH INSERT INTO items (id, label) VALUES (3, 'batch-a'); INSERT INTO items (id, label) VALUES (4, 'batch-b'); APPLY BATCH;",
+		"CREATE TABLE IF NOT EXISTS ddl_probe (id int PRIMARY KEY, value text)",
+	} {
+		if _, err := manager.CassandraQuery(ctx, c, CassandraQueryInput{Keyspace: "rowset_probe", Query: query, Limit: 10}); err != nil {
+			t.Fatalf("%s: %v", query, err)
+		}
+	}
+	if err := manager.CassandraImport(ctx, c, "rowset_probe", "items", []string{"id", "label"}, [][]any{{"5", "imported"}}); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	result, err = manager.CassandraQuery(ctx, c, CassandraQueryInput{Keyspace: "rowset_probe", Query: "SELECT id, label FROM items WHERE id IN (2,3,4,5)", Limit: 10})
+	if err != nil || len(result.Rows) != 4 {
+		t.Fatalf("writes: %#v err=%v", result, err)
+	}
+	ddl, err := cassandraDDL(ctx, c, "table", "rowset_probe", "items")
+	if err != nil || !strings.Contains(ddl, "CREATE TABLE") || !strings.Contains(ddl, "PRIMARY KEY") {
+		t.Fatalf("ddl: %q err=%v", ddl, err)
+	}
+}
+
+func TestCassandraImportValue(t *testing.T) {
+	tests := []struct {
+		value string
+		typ   gocql.Type
+		want  any
+	}{
+		{"42", gocql.TypeInt, int(42)}, {"true", gocql.TypeBoolean, true}, {"1.5", gocql.TypeDouble, 1.5}, {"hello", gocql.TypeText, "hello"},
+	}
+	for _, test := range tests {
+		got, err := cassandraImportValue(test.value, test.typ)
+		if err != nil || !reflect.DeepEqual(got, test.want) {
+			t.Fatalf("%s: got %#v err=%v", test.value, got, err)
+		}
+	}
+	if _, err := cassandraImportValue("not-an-int", gocql.TypeInt); err == nil {
+		t.Fatal("invalid integer accepted")
 	}
 }
 
