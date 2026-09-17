@@ -178,7 +178,9 @@ export function mongoRequest(source: string, database: string): string {
   for (const key of ["filter", "project", "sort"]) if (query[key] != null && (typeof query[key] !== "object" || Array.isArray(query[key]))) throw new Error(`${key} must be a JSON object.`);
   if (query.skip != null && (!Number.isInteger(query.skip) || query.skip < 0)) throw new Error("Skip must be a non-negative integer.");
   if (query.limit != null && (!Number.isInteger(query.limit) || query.limit < 1 || query.limit > 10000)) throw new Error("Document limit must be between 1 and 10000.");
-  if (query.maxTimeMs != null && (!Number.isInteger(query.maxTimeMs) || query.maxTimeMs < 1 || query.maxTimeMs > 600000)) throw new Error("Max time must be between 1 and 600000 ms.");
+  // 0 is "no limit", the same sentinel the backend and this bar's own
+  // Options field use — not an out-of-range value to reject.
+  if (query.maxTimeMs != null && (!Number.isInteger(query.maxTimeMs) || query.maxTimeMs < 0 || query.maxTimeMs > 600000)) throw new Error("Max time must be between 0 and 600000 ms.");
   // The toolbar is authoritative, including when replaying history from another database.
   if (query.database != null && query.database !== database) throw new Error("The query database differs from the toolbar. Remove database from the query or select that database.");
   return `{${normalized.trim().slice(1, -1)},"database":${JSON.stringify(database)}}`;
@@ -188,6 +190,21 @@ const SHELL_AGGREGATE_QUERY = /^\s*db\s*\.\s*([A-Za-z0-9_$]+)\s*\.\s*aggregate\s
 
 export function isMongoAggregateShellQuery(source: string): boolean {
   return SHELL_AGGREGATE_QUERY.test(source);
+}
+
+// True for shell syntax and for the raw {collection,pipeline,...} request
+// object Activity/History save an aggregate() call as (json.Marshal of the
+// backend's request struct) — reopening either must route to aggregate(),
+// not fall through to find()'s field validation, which rejects "pipeline"
+// as an unknown field.
+export function isMongoAggregateQuery(source: string): boolean {
+  if (isMongoAggregateShellQuery(source)) return true;
+  try {
+    const parsed: unknown = JSON.parse(source);
+    return !!parsed && typeof parsed === "object" && !Array.isArray(parsed) && "pipeline" in parsed;
+  } catch {
+    return false;
+  }
 }
 
 export function mongoAggregateQuery(collection = "") {
@@ -213,6 +230,23 @@ export function mongoAggregateShellToParts(source: string): MongoAggregateParts 
   return { collection, pipeline: args.trim() || "[]" };
 }
 
+// Parse the raw {collection,pipeline,...} request object into the bar's
+// parts, the same way mongoRequestToParts does for find()'s saved shape.
+export function mongoAggregateRequestToParts(source: string): MongoAggregateParts {
+  const query: unknown = JSON.parse(source);
+  if (!query || typeof query !== "object" || Array.isArray(query)) throw new Error("Expected a JSON object.");
+  const { collection, pipeline } = query as { collection?: unknown; pipeline?: unknown };
+  if (typeof collection !== "string" || !collection.trim()) throw new Error("Query has no collection.");
+  return { collection, pipeline: pipeline !== undefined ? JSON.stringify(pipeline, null, 2) : "[]" };
+}
+
+// Accepts shell syntax or the raw request object, for the query bar to
+// populate itself from either source (typing vs. reopening from
+// Activity/History).
+export function mongoAggregateSourceToParts(source: string): MongoAggregateParts {
+  return isMongoAggregateShellQuery(source) ? mongoAggregateShellToParts(source) : mongoAggregateRequestToParts(source);
+}
+
 export function mongoAggregatePartsToShell(parts: MongoAggregateParts): string {
   const collection = parts.collection.trim() || "collection";
   const pipeline = parts.pipeline.trim() || "[]";
@@ -236,12 +270,20 @@ export function mongoAggregateShellToRequest(source: string): string {
 }
 
 // Validate without reserializing, so large BSON numbers in the pipeline
-// keep their original digits on their way to the server.
+// keep their original digits on their way to the server. Accepts shell
+// syntax or the raw request object (Activity/History entries are saved in
+// the latter), the same way mongoRequest does for find().
 export function mongoAggregateRequest(source: string, database: string): string {
-  const normalized = mongoAggregateShellToRequest(source);
+  const normalized = isMongoAggregateShellQuery(source) ? mongoAggregateShellToRequest(source) : source;
   const query = JSON.parse(normalized);
+  if (!query || Array.isArray(query) || typeof query !== "object") throw new Error("Use a JSON object with collection and pipeline.");
+  for (const key of Object.keys(query)) if (!["collection", "pipeline", "maxTimeMs", "limit", "database"].includes(key)) throw new Error(`Unsupported query field: ${key}`);
   if (typeof query.collection !== "string" || !query.collection.trim()) throw new Error("Choose a collection in the query, or open one from the explorer.");
   if (!Array.isArray(query.pipeline) || query.pipeline.length === 0) throw new Error("The pipeline must be a non-empty array of stages.");
+  // 0 is "no limit", the same sentinel find() uses.
+  if (query.maxTimeMs != null && (!Number.isInteger(query.maxTimeMs) || query.maxTimeMs < 0 || query.maxTimeMs > 600000)) throw new Error("Max time must be between 0 and 600000 ms.");
+  if (query.limit != null && (!Number.isInteger(query.limit) || query.limit < 1 || query.limit > 10000)) throw new Error("Document limit must be between 1 and 10000.");
+  if (query.database != null && query.database !== database) throw new Error("The query database differs from the toolbar. Remove database from the query or select that database.");
   return `{${normalized.trim().slice(1, -1)},"database":${JSON.stringify(database)}}`;
 }
 

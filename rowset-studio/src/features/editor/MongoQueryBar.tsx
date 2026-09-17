@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { Icon } from "../../components/Icon";
 import {
-  isMongoAggregateShellQuery,
+  isMongoAggregateQuery,
   mongoAggregatePartsToShell,
   mongoAggregateQuery,
-  mongoAggregateShellToParts,
+  mongoAggregateSourceToParts,
   mongoPartsToShell,
   mongoQuery,
   mongoSourceToParts,
@@ -28,10 +28,10 @@ export default function MongoQueryBar({ tabKey, sql, onChange, onRun }: { tabKey
   const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
-    const isAggregate = isMongoAggregateShellQuery(sql);
+    const isAggregate = isMongoAggregateQuery(sql);
     setAggregate(isAggregate);
     if (isAggregate) {
-      try { setAggregateParts(mongoAggregateShellToParts(sql)); }
+      try { setAggregateParts(mongoAggregateSourceToParts(sql)); }
       catch { setAggregateParts((current) => ({ ...current, collection: current.collection || "collection" })); }
       return;
     }

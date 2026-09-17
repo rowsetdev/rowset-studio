@@ -5,6 +5,18 @@ and `scripts/package-macos.sh` stamp it into Studio (sidebar), the `rowset`
 executable and the macOS app. Every change set bumps the patch version and adds
 an entry here.
 
+## 0.0.93 — 2026-09-17
+
+- Fixed: reopening a MongoDB `find()` from Activity/History failed with
+  "Max time must be between 1 and 600000 ms." The saved request always
+  includes `maxTimeMs`, and 0 (the backend's own "no limit" default) was
+  being rejected as out of range instead of accepted.
+- Fixed: reopening an `aggregate()` from Activity/History failed outright
+  ("Unsupported query field: pipeline"), because only its shell-syntax form
+  was recognized — the raw `{collection,pipeline,...}` object History
+  actually saves fell through to `find()`'s field validation. The query bar
+  now also switches to Aggregate mode when reopening one.
+
 ## 0.0.92 — 2026-09-17
 
 - Added MongoDB row backups: an update/delete from the Write dialog (or

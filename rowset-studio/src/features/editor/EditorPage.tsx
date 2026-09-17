@@ -21,7 +21,7 @@ import { useSchema } from "./useEditor";
 import { formatSql, statementAt, splitStatements } from "./sqlText";
 import { useAuth } from "../../lib/auth";
 import { SchemaActions } from "./schemaActions";
-import { mongoQuery, mongoRequest, formatMongoQuery, isMongoAggregateShellQuery, mongoAggregateRequest } from "./mongoQuery";
+import { mongoQuery, mongoRequest, formatMongoQuery, isMongoAggregateQuery, mongoAggregateRequest } from "./mongoQuery";
 import MongoQueryBar from "./MongoQueryBar";
 import RedisQueryBar, { redisQuery } from "./RedisQueryBar";
 import ElasticsearchQueryBar, { elasticsearchQuery } from "./ElasticsearchQueryBar";
@@ -521,7 +521,7 @@ function EditorWorkspace({ snapshot, initial }: { snapshot: WorkspaceSnapshot; i
     // A restore script puts rows back; backing it up again would only add noise.
     const backup = !skipBackup && !shared && !activeTab?.restoreOf && rowBackupEnabled();
     const runMongo = async (): Promise<QueryResult> => {
-      const aggregate = isMongoAggregateShellQuery(sql);
+      const aggregate = isMongoAggregateQuery(sql);
       const path = aggregate ? "aggregate" : "find";
       const body = aggregate ? mongoAggregateRequest(sql, selectedDb) : mongoRequest(sql, selectedDb);
       const response = await api<{ documents: unknown[]; truncated: boolean; durationMs: number; limit: number }>(`/connections/${connectionId}/documents/${path}`, { method: "POST", signal: controller.signal, body });

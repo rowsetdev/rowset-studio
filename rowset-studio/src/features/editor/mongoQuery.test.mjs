@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mongoQuery, mongoRequest, formatMongoQuery, mongoShellToRequest, isMongoShellQuery, mongoShellToParts, mongoPartsToShell, mongoRequestToParts, mongoSourceToParts } from './mongoQuery.ts';
+import { mongoQuery, mongoRequest, formatMongoQuery, mongoShellToRequest, isMongoShellQuery, mongoShellToParts, mongoPartsToShell, mongoRequestToParts, mongoSourceToParts, isMongoAggregateQuery, mongoAggregateRequest, mongoAggregateRequestToParts, mongoAggregateSourceToParts } from './mongoQuery.ts';
 test('MongoDB request and formatting preserve raw integers and decimals', () => {
   const source = '{"collection":"items","filter":{"count":9007199254740993,"n":1.12345678901234567890,"text":"a, {b}: c"},"sort":{},"limit":100}';
   assert(mongoRequest(source,'test').includes('9007199254740993'));
@@ -45,4 +45,24 @@ test('the query bar also parses the raw request JSON saved in Activity/History, 
   const big = '{"collection":"items","filter":{"id":9007199254740993},"limit":10}';
   assert.equal(mongoRequestToParts(big).filter, '{"id":9007199254740993}');
   assert.throws(() => mongoRequestToParts('{"filter":{}}'));
+});
+test('a find() saved with maxTimeMs:0 (the backend "no limit" sentinel) reopens instead of erroring', () => {
+  // Reproduces a real bug: the raw request Activity/History save always
+  // includes maxTimeMs, and the backend's own zero-value for "unset" was
+  // being rejected as out of range on reopen.
+  const saved = '{"database":"rowset_ui_check","collection":"ui_probe3","filter":{},"project":null,"sort":{},"skip":0,"limit":100,"maxTimeMs":0}';
+  assert.equal(JSON.parse(mongoRequest(saved, 'rowset_ui_check')).maxTimeMs, 0);
+});
+test('aggregate() reopens from its raw request JSON the same way find() does', () => {
+  const saved = '{"database":"rowset_ui_check","collection":"orders","pipeline":[{"$match":{"status":"paid"}}],"maxTimeMs":0,"limit":100}';
+  assert.equal(isMongoAggregateQuery(saved), true);
+  assert.equal(isMongoAggregateQuery('{"collection":"items","filter":{}}'), false);
+  const request = JSON.parse(mongoAggregateRequest(saved, 'rowset_ui_check'));
+  assert.equal(request.collection, 'orders');
+  assert.equal(request.maxTimeMs, 0);
+  assert.deepEqual(request.pipeline, [{ $match: { status: 'paid' } }]);
+  const parts = mongoAggregateRequestToParts(saved);
+  assert.equal(parts.collection, 'orders');
+  assert.deepEqual(mongoAggregateSourceToParts(saved), parts);
+  assert.throws(() => mongoAggregateRequest('{"collection":"items","pipeline":[],"unknownField":1}', 'test'));
 });
