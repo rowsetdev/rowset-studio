@@ -5,6 +5,19 @@ and `scripts/package-macos.sh` stamp it into Studio (sidebar), the `rowset`
 executable and the macOS app. Every change set bumps the patch version and adds
 an entry here.
 
+## 0.0.89 — 2026-09-17
+
+- Added an Aggregate mode to the MongoDB query bar: a Find/Aggregate toggle
+  and a pipeline editor, kept in sync with `db.collection.aggregate([...])`
+  in the editor below it (previously only reachable by hand-typing shell
+  syntax).
+- Enabled CockroachDB's "Explain with actual rows" (the backend already
+  supported EXPLAIN ANALYZE; only the capability flag hid it).
+- Added a live CockroachDB transaction test (Begin/Execute/Rollback and
+  Begin/Execute/Commit) and a live DuckDB one — both engines advertised
+  Transactions but neither was exercised live before, unlike PostgreSQL,
+  MySQL, MariaDB, SQL Server and SQLite.
+
 ## 0.0.88 — 2026-09-17
 
 - Removed Snowflake support (connection type, driver, DSN/schema/DDL

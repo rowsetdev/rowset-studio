@@ -27,7 +27,7 @@ func EngineCapabilities(name string) Capabilities {
 	case "mssql", "sqlserver":
 		return Capabilities{Transactions: true, Explain: true, ExplainAnalyze: true, DDL: true, CSVImport: true, CSVExport: true, JSONExport: true, SQLExport: true, SSH: true, Shared: true, MultiNode: true}
 	case "cockroachdb":
-		return Capabilities{Transactions: true, Explain: true, DDL: true, CSVImport: true, CSVExport: true, JSONExport: true, SQLExport: true, SSH: true, Shared: true, MultiNode: true}
+		return Capabilities{Transactions: true, Explain: true, ExplainAnalyze: true, DDL: true, CSVImport: true, CSVExport: true, JSONExport: true, SQLExport: true, SSH: true, Shared: true, MultiNode: true}
 	case "sqlite", "duckdb":
 		return Capabilities{Transactions: true, DDL: true, CSVImport: true, CSVExport: true, JSONExport: true}
 	case "clickhouse":

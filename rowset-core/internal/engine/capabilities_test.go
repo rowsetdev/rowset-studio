@@ -3,7 +3,7 @@ package engine
 import "testing"
 
 func TestEngineCapabilitiesDoNotAdvertiseUnsupportedControls(t *testing.T) {
-	if capability := EngineCapabilities("cockroachdb"); !capability.Explain || capability.ExplainAnalyze {
+	if capability := EngineCapabilities("cockroachdb"); !capability.Explain || !capability.ExplainAnalyze {
 		t.Fatalf("CockroachDB plan capabilities are inconsistent: %+v", capability)
 	}
 	if capability := EngineCapabilities("clickhouse"); !capability.Explain || capability.ExplainAnalyze {

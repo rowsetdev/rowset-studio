@@ -67,6 +67,66 @@ func TestSQLiteFileQuerySchemaDDLAndRollback(t *testing.T) {
 	}
 }
 
+// DuckDB's transaction support was covered by the capability flag but never
+// by a live test, unlike SQLite's equivalent above; this closes that gap.
+func TestDuckDBFileQuerySchemaAndRollback(t *testing.T) {
+	if !DuckDBAvailable {
+		t.Skip("built without CGO; DuckDB is unavailable")
+	}
+	path := filepath.Join(t.TempDir(), "database.duckdb")
+	db, err := sql.Open("duckdb", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`CREATE TABLE child(id INTEGER PRIMARY KEY, label TEXT); INSERT INTO child VALUES (1,'before')`)
+	db.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := NewManager()
+	defer m.Close()
+	ctx := context.Background()
+	connection := Connection{ID: "duckdb", Engine: "duckdb", Database: path}
+	if err = m.Test(ctx, connection); err != nil {
+		t.Fatal(err)
+	}
+	schema, err := m.Schema(ctx, connection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(schema.Tables["main.child"]) != 2 {
+		t.Fatalf("columns: %#v", schema.Tables["main.child"])
+	}
+	tx, err := m.Begin(ctx, connection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx.Execute(ctx, `UPDATE child SET label='after' WHERE id=1`, 10); err != nil {
+		t.Fatal(err)
+	}
+	if err = tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	result, err := m.Execute(ctx, connection, "SELECT label FROM child", 10)
+	if err != nil || result.Rows[0][0] != "before" {
+		t.Fatalf("rollback: %#v %v", result, err)
+	}
+	tx, err = m.Begin(ctx, connection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx.Execute(ctx, `DELETE FROM child WHERE id=1`, 10); err != nil {
+		t.Fatal(err)
+	}
+	if err = tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	result, err = m.Execute(ctx, connection, "SELECT count(*) FROM child", 10)
+	if err != nil || result.Rows[0][0] != int64(0) {
+		t.Fatalf("commit: %#v %v", result, err)
+	}
+}
+
 func TestDatabaseFilesDoNotCreateOnTypo(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "missing.sqlite")
 	m := NewManager()

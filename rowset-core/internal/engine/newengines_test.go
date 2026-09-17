@@ -60,6 +60,35 @@ func TestLiveCockroachDB(t *testing.T) {
 	if len(schema.Tables) == 0 {
 		t.Fatal("expected at least one table from CockroachDB's schema catalog")
 	}
+	// The capability map advertises Transactions for CockroachDB; this was
+	// never exercised live before, only inferred from PostgreSQL wire
+	// compatibility.
+	tx, err := m.Begin(ctx, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx.Execute(ctx, "UPDATE rowset_crdb_probe SET label='changed' WHERE id=1", 10); err != nil {
+		t.Fatal(err)
+	}
+	if err = tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if r, err = m.Execute(ctx, c, "SELECT label FROM rowset_crdb_probe WHERE id=1", 10); err != nil || r.Rows[0][0] != "hello" {
+		t.Fatalf("rollback did not revert the update: %#v %v", r, err)
+	}
+	tx, err = m.Begin(ctx, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx.Execute(ctx, "DELETE FROM rowset_crdb_probe WHERE id=1", 10); err != nil {
+		t.Fatal(err)
+	}
+	if err = tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if r, err = m.Execute(ctx, c, "SELECT count(*) FROM rowset_crdb_probe", 10); err != nil || r.Rows[0][0] != int64(0) {
+		t.Fatalf("commit did not persist the delete: %#v %v", r, err)
+	}
 }
 
 // TestLiveRedis exercises key scanning across string, hash, list, set and

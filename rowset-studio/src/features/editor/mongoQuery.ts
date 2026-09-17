@@ -194,6 +194,31 @@ export function mongoAggregateQuery(collection = "") {
   return `db.${collection || "collection"}.aggregate([\n  \n])`;
 }
 
+export interface MongoAggregateParts {
+  collection: string;
+  pipeline: string;
+}
+
+// Parse `db.<collection>.aggregate([...])` into {collection,pipeline} for
+// the query bar, without validating the pipeline itself: that happens on
+// run, the same way a malformed find() filter is only caught then.
+export function mongoAggregateShellToParts(source: string): MongoAggregateParts {
+  const match = SHELL_AGGREGATE_QUERY.exec(source);
+  if (!match) throw new Error("Query must start with db.<collection>.aggregate([...])");
+  const collection = match[1];
+  const openIdx = match[0].length - 1;
+  const { args, endIdx } = extractCall(source, openIdx);
+  const rest = source.slice(endIdx).trim().replace(/;$/, "").trim();
+  if (rest) throw new Error(`Unsupported query syntax: ${rest}`);
+  return { collection, pipeline: args.trim() || "[]" };
+}
+
+export function mongoAggregatePartsToShell(parts: MongoAggregateParts): string {
+  const collection = parts.collection.trim() || "collection";
+  const pipeline = parts.pipeline.trim() || "[]";
+  return `db.${collection}.aggregate(${pipeline})`;
+}
+
 // Parse `db.<collection>.aggregate([...])` into the {collection,pipeline}
 // request object the backend expects. Only the pipeline array itself is
 // taken as-is; there is no field-by-field bar for aggregation stages.
