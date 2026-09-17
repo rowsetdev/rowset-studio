@@ -5,6 +5,19 @@ and `scripts/package-macos.sh` stamp it into Studio (sidebar), the `rowset`
 executable and the macOS app. Every change set bumps the patch version and adds
 an entry here.
 
+## 0.0.88 — 2026-09-17
+
+- Removed Snowflake support (connection type, driver, DSN/schema/DDL
+  handling, engine picker and logo) to focus engine coverage elsewhere.
+- Added Elasticsearch `sort`/`search_after` pagination past the 10,000-hit
+  window and `aggs` in the search bar's raw JSON, with aggregation results
+  and the next page's `search_after` values shown in the grid.
+- Added MongoDB read-only aggregation: `db.<collection>.aggregate([...])` in
+  the editor runs a pipeline, with `$out`, `$merge`, `$lookup` and other
+  writing/cross-collection/JavaScript stages rejected before it runs.
+- Added a "Test all" action on the Connections page to test every filtered
+  connection at once.
+
 ## 0.0.87 — 2026-09-17
 
 - Added MongoDB document insert/update/delete and Elasticsearch document

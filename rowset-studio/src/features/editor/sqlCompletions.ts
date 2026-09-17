@@ -30,11 +30,11 @@ export interface SqlCompletions {
 }
 
 // Engines where one statement can reach another database by name.
-const CROSS_DATABASE = new Set(["mysql", "mariadb", "mssql", "sqlserver", "snowflake", "cockroachdb", "clickhouse", "cassandra"]);
+const CROSS_DATABASE = new Set(["mysql", "mariadb", "mssql", "sqlserver", "cockroachdb", "clickhouse", "cassandra"]);
 // These engines address an object as database.table (or keyspace.table)
 // instead of database.schema.table.
 const DIRECT_DATABASE = new Set(["mysql", "mariadb", "clickhouse", "cassandra"]);
-const QUOTED_SQL_ENGINES = new Set(["postgres", "postgresql", "cockroachdb", "sqlite", "duckdb", "clickhouse", "snowflake", "cassandra"]);
+const QUOTED_SQL_ENGINES = new Set(["postgres", "postgresql", "cockroachdb", "sqlite", "duckdb", "clickhouse", "cassandra"]);
 
 const STOP_WORDS = new Set([
   "where", "on", "join", "inner", "left", "right", "full", "cross", "group",

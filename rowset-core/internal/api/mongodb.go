@@ -99,6 +99,86 @@ func (s *Server) mongoFind(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"documents": docs, "truncated": truncated, "durationMs": duration, "limit": input.Limit})
 }
 
+func (s *Server) mongoAggregate(w http.ResponseWriter, r *http.Request) {
+	connection, ok := s.authorizedConnection(w, r)
+	if !ok {
+		return
+	}
+	identity := identityFromContext(r.Context())
+	if connection.Engine != "mongodb" || s.config.Shared || !identity.IsAdmin() {
+		writeError(w, 403, "UNSUPPORTED", "document queries are available to personal workspace administrators only")
+		return
+	}
+	var input engine.MongoAggregateInput
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	input.Collection = strings.TrimSpace(input.Collection)
+	if input.Collection == "" || strings.ContainsAny(input.Collection, "\x00\r\n") {
+		writeError(w, 400, "BAD_REQUEST", "collection is required")
+		return
+	}
+	if input.Limit == 0 {
+		input.Limit = 100
+	}
+	if input.Limit < 1 || input.Limit > 10000 {
+		writeError(w, 400, "BAD_REQUEST", "limit must be between 1 and 10000")
+		return
+	}
+	if _, err := engine.ValidateMongoPipeline(input.Pipeline); err != nil {
+		writeError(w, 400, "BAD_REQUEST", err.Error())
+		return
+	}
+	database := input.Database
+	if database == "" {
+		database = connection.Database
+	}
+	quote := func(v string) string { return `"` + strings.ReplaceAll(v, `"`, `""`) + `"` }
+	statement := "SELECT * FROM " + quote(database) + "." + quote(input.Collection) + ` WHERE "__rowset_aggregation_pipeline__" IS NOT NULL`
+	info, err := sqlguard.ParseDialect(sqlguard.DialectPostgres, statement)
+	if err != nil {
+		writeError(w, 400, "BAD_REQUEST", err.Error())
+		return
+	}
+	disabled, enabled, limit, timeout, err := s.resolvePolicies(r, identity, connection)
+	if err != nil {
+		writeError(w, 500, "INTERNAL", "policies unavailable")
+		return
+	}
+	decision := policy.Evaluate(policy.Input{Statement: info, Role: "admin", Environment: connection.Environment, Disabled: disabled, Enabled: enabled})
+	decision, limit, err = s.applyCustomPolicies(r, identity, connection, info, false, decision, limit)
+	raw, _ := json.Marshal(input)
+	if err != nil {
+		writeError(w, 500, "INTERNAL", "policies unavailable")
+		return
+	}
+	if decision.Effect != policy.Allow {
+		s.recordActivity(r, connection.ID, string(raw), "blocked", 0, 0, "", "", auditMeta{decision: "deny", reason: decision.Reason, policyID: decision.PolicyID})
+		writePolicyError(w, 403, "POLICY_DENIED", decision, nil)
+		return
+	}
+	if limit > 0 && limit < input.Limit {
+		input.Limit = limit
+	}
+	target, err := s.engineConnection(r, connection, database)
+	if err != nil {
+		writeError(w, 502, "EXEC_ERROR", err.Error())
+		return
+	}
+	ctx, cancel := withConnectionTimeout(r, connection, timeout, 10*time.Minute)
+	defer cancel()
+	started := time.Now()
+	docs, truncated, err := s.engines.MongoAggregate(ctx, target, input)
+	duration := time.Since(started).Milliseconds()
+	if err != nil {
+		s.recordActivity(r, connection.ID, string(raw), "error", 0, duration, "", "", auditMeta{decision: "allow", errorMessage: err.Error()})
+		writeError(w, 502, "EXEC_ERROR", err.Error())
+		return
+	}
+	s.recordActivity(r, connection.ID, string(raw), "success", int64(len(docs)), duration, "", "", auditMeta{decision: "allow"})
+	writeJSON(w, 200, map[string]any{"documents": docs, "truncated": truncated, "durationMs": duration, "limit": input.Limit})
+}
+
 func (s *Server) mongoInsert(w http.ResponseWriter, r *http.Request) {
 	connection, ok := s.authorizedConnection(w, r)
 	if !ok {

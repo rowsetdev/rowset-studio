@@ -6,7 +6,6 @@
   <td align="center" width="72"><img src="rowset-studio/src/assets/engines/mariadb.png" height="36" alt="MariaDB" /></td>
   <td align="center" width="72"><img src="rowset-studio/src/assets/engines/mssql.svg" height="36" alt="SQL Server" /></td>
   <td align="center" width="72"><img src="rowset-studio/src/assets/engines/cockroachdb.svg" height="36" alt="CockroachDB" /></td>
-  <td align="center" width="72"><img src="rowset-studio/src/assets/engines/snowflake.svg" height="36" alt="Snowflake" /></td>
   <td align="center" width="72"><img src="rowset-studio/src/assets/engines/clickhouse.svg" height="36" alt="ClickHouse" /></td>
   <td align="center" width="72"><img src="rowset-studio/src/assets/engines/mongodb.svg" height="36" alt="MongoDB" /></td>
   <td align="center" width="72"><img src="rowset-studio/src/assets/engines/redis.svg" height="36" alt="Redis" /></td>
@@ -39,20 +38,22 @@ encrypted in a local SQLite database.
 | <img src="rowset-studio/src/assets/engines/mysql.png" height="18" valign="middle"> MySQL | Host/port or URL, SSH tunnel | Full SQL editor, DDL, CSV import, row editing, schema compare |
 | <img src="rowset-studio/src/assets/engines/mariadb.png" height="18" valign="middle"> MariaDB | Host/port or URL, SSH tunnel | Full SQL editor, DDL, CSV import, row editing, schema compare |
 | <img src="rowset-studio/src/assets/engines/mssql.svg" height="18" valign="middle"> SQL Server | Host/port or URL, SSH tunnel | SQL editor, DDL, CSV import, row editing, schema compare, estimated and actual plans |
-| <img src="rowset-studio/src/assets/engines/cockroachdb.svg" height="18" valign="middle"> CockroachDB | Host/port (PostgreSQL wire protocol) | SQL editor, transactions, DDL, CSV import/export, row editing; plan visualization is unavailable |
-| <img src="rowset-studio/src/assets/engines/snowflake.svg" height="18" valign="middle"> Snowflake | Account; user's default warehouse and role | SQL editor and schema browsing; DDL viewing, CSV import and plan visualization are unavailable; live account testing is pending |
-| SQLite | Absolute path to an existing file | SQL, transactions, schema, keys, indexes, DDL, CSV/JSON export |
-| DuckDB | Absolute path to an existing file; CGO build | SQL, transactions, tables/views, DDL, CSV/JSON export |
-| <img src="rowset-studio/src/assets/engines/clickhouse.svg" height="18" valign="middle"> ClickHouse | Native TCP: 9440 with TLS, 9000 without | SQL, databases, tables/views, DDL, CSV/JSON export |
-| <img src="rowset-studio/src/assets/engines/mongodb.svg" height="18" valign="middle"> MongoDB | Host/port; `authSource=admin` | Compass-style filter/project/sort/skip/limit query bar synced with `db.collection.find()`, read-only |
-| <img src="rowset-studio/src/assets/engines/redis.svg" height="18" valign="middle"> Redis | Host/port | Pattern/type scan bar, keys grouped by type as pseudo-tables |
-| Valkey | Host/port | Redis-compatible pattern/type scan bar and key previews; writes are unavailable |
+| <img src="rowset-studio/src/assets/engines/cockroachdb.svg" height="18" valign="middle"> CockroachDB | Host/port (PostgreSQL wire protocol) | SQL editor, transactions, DDL, CSV import/export, row editing, estimated plans |
+| SQLite | Absolute path to an existing file | SQL, transactions, schema, keys, indexes, DDL, CSV import/export, JSON export |
+| DuckDB | Absolute path to an existing file; CGO build | SQL, transactions, tables/views, DDL, CSV import/export, JSON export |
+| <img src="rowset-studio/src/assets/engines/clickhouse.svg" height="18" valign="middle"> ClickHouse | Native TCP: 9440 with TLS, 9000 without | SQL, databases, tables/views, DDL, CSV/JSON export, estimated plans |
+| <img src="rowset-studio/src/assets/engines/mongodb.svg" height="18" valign="middle"> MongoDB | Host/port; `authSource=admin` | Compass-style filter/project/sort/skip/limit query bar synced with `db.collection.find()`, `db.collection.aggregate([...])` read-only pipelines, document insert/update/delete |
+| <img src="rowset-studio/src/assets/engines/redis.svg" height="18" valign="middle"> Redis | Host/port | Pattern/type scan bar, keys grouped by type as pseudo-tables, string/hash key writes and delete |
+| Valkey | Host/port | Redis-compatible pattern/type scan bar, key previews, string/hash key writes and delete |
 | <img src="rowset-studio/src/assets/engines/cassandra.svg" height="18" valign="middle"> Cassandra | Contact points, keyspace, TLS/SSH, consistency/paging | Governed CQL reads/writes/DDL/batches, schema/DDL, CSV import, CSV/JSON export, CQL `INSERT JSON` export for base tables without counters |
-| <img src="rowset-studio/src/assets/engines/elasticsearch.svg" height="18" valign="middle"> Elasticsearch | HTTP API host/port | Index/query/size search bar, index mapping browsing |
+| <img src="rowset-studio/src/assets/engines/elasticsearch.svg" height="18" valign="middle"> Elasticsearch | HTTP API host/port | Index/query/size search bar with `sort`/`search_after` pagination and `aggs`, index mapping browsing, document index/update/delete |
 
-MongoDB, Redis, Valkey and Elasticsearch are read-only in this release; Cassandra uses governed CQL, with a query bar tailored to
-each — see [Additional databases](#additional-databases-and-schema-comparison)
-below for exact limits.
+MongoDB, Redis, Valkey and Elasticsearch writes are limited to single-document/key
+operations (no bulk APIs or transactions yet); MongoDB additionally has
+read-only aggregation pipelines. Cassandra uses governed CQL. Each has a
+query bar tailored to it — see
+[Additional databases](#additional-databases-and-schema-comparison) below for
+exact limits.
 
 ## Features
 
@@ -62,7 +63,8 @@ below for exact limits.
   and routing. Reach a database through an **SSH tunnel** (password or
   private key), with the server's host key trusted the first time and
   verified on every connection. A **Safe mode** switch per connection blocks
-  every write statement, no separate read-only role required.
+  every write statement, no separate read-only role required. **Test all**
+  on the Connections page pings every filtered connection at once.
 - **Command palette** (<kbd>⇧⌘K</kbd>) — jump to any connection or page
   without leaving the keyboard.
 - **SQL editor** — run the statement at the cursor, the selection, or every
@@ -71,7 +73,9 @@ below for exact limits.
   open/download `.sql` files, and a **Snippets** menu to save and reuse
   statements per connection.
 - **Execution plans** — Explain draws the plan of a statement as a diagram
-  with cost heat and warnings; actual rows and timings on request.
+  with cost heat and warnings; actual rows and timings on request for
+  PostgreSQL, MySQL, MariaDB and SQL Server. CockroachDB and ClickHouse get a
+  text plan (no actual-rows mode yet).
 - **Edit rows** — change cells of a one-table result, review the generated
   UPDATE statements and apply them like any query.
 - **CSV import** — import a CSV file into a table in one transaction, with a
@@ -107,15 +111,22 @@ running. Only simple nullable column additions are generated; other changes
 remain explicit manual steps. This is not a complete dependency-aware
 migration tool: CHECK constraints, complete index/FK definitions, views and
 routines need separate DDL review. Failed metadata reads are shown and
-disable drafts.
+disable drafts. MongoDB, Redis, Valkey and Elasticsearch have no
+table/column metadata to diff, so they don't appear in the connection
+pickers.
 
-MongoDB, Redis and Elasticsearch are read-only: aggregation
-pipelines, transactions, writes and SSH tunnels are not yet supported for
-them, and index/primary-key/foreign-key metadata is not loaded for any
+MongoDB, Redis, Valkey and Elasticsearch support single-document/key
+insert, update and delete from the query toolbar's **Write** action, behind
+the same policy, read-only and audit rules as SQL writes. MongoDB also runs
+read-only `aggregate()` pipelines, with `$out`, `$merge`, `$lookup` and
+other writing/cross-collection/JavaScript stages rejected. Bulk APIs,
+transactions and SSH tunnels are not yet supported for any of the four, and
+index/primary-key/foreign-key metadata is not loaded for any
 non-`database/sql` engine (SQLite, DuckDB, ClickHouse and these four).
-Inline grid editing remains available only for the SQL engines. Cassandra
-supports CSV import in logged batches and CSV/JSON export. Query each engine's own tools directly for operations
-Rowset doesn't cover yet.
+Inline grid editing remains available only for the SQL engines, since it's
+built on generated UPDATE/DELETE statements. Cassandra supports CSV import
+in logged batches and CSV/JSON export. Query each engine's own tools
+directly for operations Rowset doesn't cover yet.
 
 Native `build-local-binary.sh` builds include DuckDB and require a working
 C/C++ compiler. `CGO_ENABLED=0` builds, including the portable

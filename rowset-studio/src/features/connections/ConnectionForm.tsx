@@ -13,7 +13,7 @@ const DEFAULT_PORT: Record<Engine, number> = {
   mariadb: 3306,
   sqlserver: 1433,
   sqlite: 1, duckdb: 1, clickhouse: 9440, mongodb: 27017,
-  cockroachdb: 26257, redis: 6379, valkey: 6379, cassandra: 9042, elasticsearch: 9200, snowflake: 443,
+  cockroachdb: 26257, redis: 6379, valkey: 6379, cassandra: 9042, elasticsearch: 9200,
 };
 
 const DEFAULT_DATABASE: Record<Engine, string> = {
@@ -22,7 +22,7 @@ const DEFAULT_DATABASE: Record<Engine, string> = {
   mariadb: "mysql",
   sqlserver: "master",
   sqlite: "", duckdb: "", clickhouse: "default", mongodb: "admin",
-  cockroachdb: "defaultdb", redis: "0", valkey: "0", cassandra: "system", elasticsearch: "", snowflake: "",
+  cockroachdb: "defaultdb", redis: "0", valkey: "0", cassandra: "system", elasticsearch: "",
 };
 
 export default function ConnectionForm({
@@ -94,7 +94,7 @@ export default function ConnectionForm({
   );
   const [error, setError] = useState("");
   const fileEngine = form.engine === "sqlite" || form.engine === "duckdb";
-  const singleEndpointEngines: Engine[] = ["clickhouse", "mongodb", "redis", "valkey", "elasticsearch", "snowflake"];
+  const singleEndpointEngines: Engine[] = ["clickhouse", "mongodb", "redis", "valkey", "elasticsearch"];
   const singleEndpoint = fileEngine || singleEndpointEngines.includes(form.engine);
   const optionalPassword = fileEngine || form.engine === "clickhouse" || form.engine === "mongodb" || form.engine === "redis" || form.engine === "valkey";
   const pending = create.isPending || update.isPending;
@@ -147,7 +147,7 @@ export default function ConnectionForm({
     try {
       const first = form.nodes[0];
       const base = first ? { ...form, host: first.host, port: first.port } : { ...form };
-      if (!sshEnabled || fileEngine || ["mongodb", "redis", "valkey", "elasticsearch", "snowflake"].includes(form.engine)) { base.sshHost = ""; }
+      if (!sshEnabled || fileEngine || ["mongodb", "redis", "valkey", "elasticsearch"].includes(form.engine)) { base.sshHost = ""; }
       if (fileEngine) { base.nodes = []; base.tlsMode = "disable"; base.tlsCaPem = ""; base.tlsServerName = ""; base.tlsClientCertPem = ""; base.tlsClientKey = ""; }
       const input = { ...base, ...extra };
       if (connection) await update.mutateAsync({ id: connection.id, input });
@@ -190,7 +190,6 @@ export default function ConnectionForm({
             <option value="mariadb">MariaDB</option>
             <option value="sqlserver">SQL Server</option>
             <option value="cockroachdb">CockroachDB</option>
-            <option value="snowflake">Snowflake</option>
             {instance?.mode === "personal" && <option value="sqlite">SQLite</option>}
             {instance?.mode === "personal" && instance.duckdb && <option value="duckdb">DuckDB</option>}
             {instance?.mode === "personal" && <option value="clickhouse">ClickHouse</option>}
@@ -221,7 +220,7 @@ export default function ConnectionForm({
             />
           </Field>}
           {!fileEngine && (() => {
-            const label = form.engine === "clickhouse" ? "Server (native TCP port, usually 9440 with TLS or 9000 without)" : form.engine === "mongodb" ? "Server (authentication database: admin)" : form.engine === "redis" || form.engine === "valkey" ? "Server" : form.engine === "cassandra" ? "Server (native transport port, usually 9042)" : form.engine === "elasticsearch" ? "Server (HTTP API port, usually 9200)" : form.engine === "snowflake" ? "Account identifier (used as host, e.g. myorg-myaccount)" : "Server";
+            const label = form.engine === "clickhouse" ? "Server (native TCP port, usually 9440 with TLS or 9000 without)" : form.engine === "mongodb" ? "Server (authentication database: admin)" : form.engine === "redis" || form.engine === "valkey" ? "Server" : form.engine === "cassandra" ? "Server (native transport port, usually 9042)" : form.engine === "elasticsearch" ? "Server (HTTP API port, usually 9200)" : "Server";
             const first = form.nodes[0];
             const firstStatus = first ? connection?.nodes.find((item) => item.id === first.id) : undefined;
             // A single host/port is the common case for every engine, including
@@ -356,7 +355,7 @@ export default function ConnectionForm({
             </div>
           </details>
         )}
-        {!fileEngine && !["mongodb", "redis", "valkey", "elasticsearch", "snowflake"].includes(form.engine) && <details className="rounded border border-slate-200 p-2 dark:border-slate-800" open={sshEnabled}>
+        {!fileEngine && !["mongodb", "redis", "valkey", "elasticsearch"].includes(form.engine) && <details className="rounded border border-slate-200 p-2 dark:border-slate-800" open={sshEnabled}>
           <summary className="cursor-pointer text-xs text-slate-600 dark:text-slate-300">SSH tunnel (optional)</summary>
           <div className="mt-2 space-y-3">
             <label className="flex items-center gap-2 text-[12px] text-slate-600 dark:text-slate-300">
@@ -412,13 +411,12 @@ export default function ConnectionForm({
           </div>
         </details>}
         {fileEngine && <p className="text-[12px] text-slate-500">Open an existing file on this computer. SQLite and DuckDB do not use network credentials. DuckDB requires a build with DuckDB support.</p>}
-        {form.engine === "mongodb" && <p className="text-[12px] text-slate-500">Browse collections and find documents using Extended JSON. Document writes, aggregation, SRV URLs and SSH are not supported yet. Leave the username blank for an unauthenticated local server.</p>}
+        {form.engine === "mongodb" && <p className="text-[12px] text-slate-500">Browse collections and find documents using Extended JSON, with single-document insert/update/delete. Aggregation pipelines, SRV URLs and SSH are not supported yet. Leave the username blank for an unauthenticated local server.</p>}
         {form.engine === "cockroachdb" && <p className="text-[12px] text-slate-500">CockroachDB is queried through its PostgreSQL wire protocol; SQL, schema browsing and HA nodes all work the same way they do for PostgreSQL.</p>}
-        {form.engine === "redis" && <p className="text-[12px] text-slate-500">Browse keys by pattern (string, hash, list, set, zset, stream). The Database field is a numeric index (0-15). Writes and SSH are not supported yet. Leave the username blank for an unauthenticated server.</p>}
-        {form.engine === "valkey" && <p className="text-[12px] text-slate-500">Valkey speaks the same protocol as Redis, so it works the same way here: browse keys by pattern, the Database field is a numeric index (0-15), writes and SSH are not supported yet. Leave the username blank for an unauthenticated server.</p>}
+        {form.engine === "redis" && <p className="text-[12px] text-slate-500">Browse keys by pattern (string, hash, list, set, zset, stream). The Database field is a numeric index (0-15). String/hash key writes and delete are supported; SSH is not. Leave the username blank for an unauthenticated server.</p>}
+        {form.engine === "valkey" && <p className="text-[12px] text-slate-500">Valkey speaks the same protocol as Redis, so it works the same way here: browse keys by pattern, the Database field is a numeric index (0-15), string/hash key writes and delete are supported, SSH is not. Leave the username blank for an unauthenticated server.</p>}
         {form.engine === "cassandra" && <p className="text-[12px] text-slate-500">Runs policy-governed CQL reads, writes, DDL and batches. Add contact points with HA nodes; SSH, TLS, consistency and paging are supported.</p>}
-        {form.engine === "elasticsearch" && <p className="text-[12px] text-slate-500">Searches one index at a time with a JSON query body. Writes, aggregations across indices and SSH are not supported yet.</p>}
-        {form.engine === "snowflake" && <p className="text-[12px] text-slate-500">Enter your account identifier as the server (e.g. myorg-myaccount). The default warehouse and role on your user are used; SSH is not supported.</p>}
+        {form.engine === "elasticsearch" && <p className="text-[12px] text-slate-500">Searches one index at a time with a JSON query body and supports single-document index/update/delete. Aggregations across indices and SSH are not supported yet.</p>}
         <ErrorText>{error}</ErrorText>
         <div className="flex justify-end gap-2 pt-2">
           <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-slate-400 hover:text-slate-100">

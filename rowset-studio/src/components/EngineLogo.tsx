@@ -10,7 +10,6 @@ import redisLogo from "../assets/engines/redis.svg";
 import valkeyLogo from "../assets/engines/valkey.svg";
 import cassandraLogo from "../assets/engines/cassandra.svg";
 import elasticsearchLogo from "../assets/engines/elasticsearch.svg";
-import snowflakeLogo from "../assets/engines/snowflake.svg";
 
 export type EngineLogoName = "postgres" | "mysql" | "mariadb" | "mssql" | string;
 
@@ -27,7 +26,6 @@ const labels: Record<string, string> = {
   valkey: "Valkey",
   cassandra: "Cassandra",
   elasticsearch: "Elasticsearch",
-  snowflake: "Snowflake",
 };
 
 export function engineLabel(engine: string) {
@@ -48,7 +46,6 @@ const logos: Record<string, string> = {
   valkey: valkeyLogo,
   cassandra: cassandraLogo,
   elasticsearch: elasticsearchLogo,
-  snowflake: snowflakeLogo,
 };
 
 export default function EngineLogo({
@@ -105,7 +102,6 @@ export default function EngineLogo({
 
 const badgeColors: Record<string, string> = {
   cockroachdb: "#6933FF",
-  snowflake: "#29B5E8",
   redis: "#DC382D",
   cassandra: "#1287B1",
   elasticsearch: "#FEC514",

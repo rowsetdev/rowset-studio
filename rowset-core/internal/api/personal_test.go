@@ -68,7 +68,7 @@ func TestInstancePublishesEngineCapabilities(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if response.Capabilities["snowflake"].DDL || !response.Capabilities["cockroachdb"].Explain || !response.Capabilities["cassandra"].CSVImport {
+	if !response.Capabilities["cockroachdb"].Explain || !response.Capabilities["cassandra"].CSVImport {
 		t.Fatalf("incorrect advertised capabilities: %#v", response.Capabilities)
 	}
 	if !response.Capabilities["mongodb"].DocumentWrite || !response.Capabilities["elasticsearch"].DocumentWrite || !response.Capabilities["redis"].KeyWrite || !response.Capabilities["valkey"].KeyWrite {

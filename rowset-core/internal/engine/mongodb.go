@@ -234,6 +234,94 @@ func mongoHasPredicate(filter bson.D) bool {
 	return false
 }
 
+type MongoAggregateInput struct {
+	Database   string          `json:"database"`
+	Collection string          `json:"collection"`
+	Pipeline   json.RawMessage `json:"pipeline"`
+	MaxTimeMs  int64           `json:"maxTimeMs"`
+	Limit      int             `json:"limit"`
+}
+
+// writeAggregationStages rejects stages that write ($out, $merge), run
+// server-side JavaScript ($function, $accumulator, $where) or read another
+// connection's data ($lookup, $graphLookup, $unionWith, $currentOp,
+// $listSessions, $planCacheStats). Aggregation here is read-only and scoped
+// to the one collection given.
+var forbiddenAggregationStages = map[string]bool{
+	"$out": true, "$merge": true, "$function": true, "$accumulator": true, "$where": true,
+	"$lookup": true, "$graphLookup": true, "$unionWith": true,
+	"$currentOp": true, "$listSessions": true, "$listLocalSessions": true, "$planCacheStats": true,
+}
+
+func ValidateMongoPipeline(raw json.RawMessage) (bson.A, error) {
+	var pipeline bson.A
+	if err := bson.UnmarshalExtJSON(raw, false, &pipeline); err != nil {
+		return nil, fmt.Errorf("pipeline must be an Extended JSON array of stage objects: %w", err)
+	}
+	if len(pipeline) == 0 {
+		return nil, errors.New("pipeline must have at least one stage")
+	}
+	for _, stage := range pipeline {
+		doc, ok := stage.(bson.D)
+		if !ok {
+			return nil, errors.New("each pipeline stage must be an object")
+		}
+		for _, entry := range doc {
+			if forbiddenAggregationStages[entry.Key] {
+				return nil, fmt.Errorf("stage %s is not supported; aggregation here is read-only", entry.Key)
+			}
+		}
+	}
+	return pipeline, nil
+}
+
+// MongoAggregate runs a read-only aggregation pipeline against one
+// collection. $out/$merge, server-side JavaScript and cross-collection
+// stages are rejected before anything runs.
+func (m *Manager) MongoAggregate(ctx context.Context, connection Connection, input MongoAggregateInput) ([]json.RawMessage, bool, error) {
+	if strings.TrimSpace(input.Collection) == "" || strings.ContainsRune(input.Collection, 0) {
+		return nil, false, errors.New("collection is required")
+	}
+	pipeline, err := ValidateMongoPipeline(input.Pipeline)
+	if err != nil {
+		return nil, false, err
+	}
+	if input.MaxTimeMs < 0 || input.MaxTimeMs > 600000 {
+		return nil, false, errors.New("maxTimeMs must be between 0 and 600000")
+	}
+	if input.Limit < 1 || input.Limit > 10000 {
+		return nil, false, errors.New("limit must be between 1 and 10000")
+	}
+	client, err := mongoClient(connection)
+	if err != nil {
+		return nil, false, err
+	}
+	defer closeMongo(client)
+	opts := options.Aggregate()
+	if input.MaxTimeMs > 0 {
+		var timeoutCancel context.CancelFunc
+		ctx, timeoutCancel = context.WithTimeout(ctx, time.Duration(input.MaxTimeMs)*time.Millisecond)
+		defer timeoutCancel()
+	}
+	cursor, err := client.Database(connection.Database).Collection(input.Collection).Aggregate(ctx, pipeline, opts)
+	if err != nil {
+		return nil, false, err
+	}
+	defer cursor.Close(ctx)
+	docs := []json.RawMessage{}
+	for cursor.Next(ctx) {
+		if len(docs) == input.Limit {
+			return docs, true, nil
+		}
+		raw, err := bson.MarshalExtJSON(cursor.Current, true, false)
+		if err != nil {
+			return nil, false, err
+		}
+		docs = append(docs, json.RawMessage(raw))
+	}
+	return docs, false, cursor.Err()
+}
+
 func (m *Manager) MongoFind(ctx context.Context, connection Connection, input MongoFindInput) ([]json.RawMessage, bool, error) {
 	if strings.TrimSpace(input.Collection) == "" || strings.ContainsRune(input.Collection, 0) {
 		return nil, false, errors.New("collection is required")

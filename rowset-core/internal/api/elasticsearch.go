@@ -43,7 +43,7 @@ func (s *Server) elasticsearchSearch(w http.ResponseWriter, r *http.Request) {
 		database = "elasticsearch"
 	}
 	statement := "SELECT * FROM " + quote(database) + "." + quote(input.Index)
-	hasQuery := len(input.Query) > 0 && strings.TrimSpace(string(input.Query)) != "{}"
+	hasQuery := len(input.Query) > 0 && strings.TrimSpace(string(input.Query)) != "{}" || len(input.SearchAfter) > 0 || len(input.Aggs) > 0
 	if hasQuery {
 		statement += ` WHERE "__rowset_search_query__" IS NOT NULL`
 	}
@@ -80,15 +80,15 @@ func (s *Server) elasticsearchSearch(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := withConnectionTimeout(r, connection, timeout, 10*time.Minute)
 	defer cancel()
 	started := time.Now()
-	docs, truncated, err := s.engines.ElasticsearchSearch(ctx, target, input)
+	result, err := s.engines.ElasticsearchSearch(ctx, target, input)
 	duration := time.Since(started).Milliseconds()
 	if err != nil {
 		s.recordActivity(r, connection.ID, string(raw), "error", 0, duration, "", "", auditMeta{decision: "allow", errorMessage: err.Error()})
 		writeError(w, 502, "EXEC_ERROR", err.Error())
 		return
 	}
-	s.recordActivity(r, connection.ID, string(raw), "success", int64(len(docs)), duration, "", "", auditMeta{decision: "allow"})
-	writeJSON(w, 200, map[string]any{"documents": docs, "truncated": truncated, "durationMs": duration, "limit": input.Size})
+	s.recordActivity(r, connection.ID, string(raw), "success", int64(len(result.Documents)), duration, "", "", auditMeta{decision: "allow"})
+	writeJSON(w, 200, map[string]any{"documents": result.Documents, "truncated": result.Truncated, "aggregations": result.Aggregations, "searchAfter": result.SearchAfter, "durationMs": duration, "limit": input.Size})
 }
 
 func (s *Server) elasticsearchIndex(w http.ResponseWriter, r *http.Request) {

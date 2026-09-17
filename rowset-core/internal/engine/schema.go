@@ -46,8 +46,6 @@ func (m *Manager) Databases(ctx context.Context, connection Connection) ([]strin
 		query = "SELECT datname FROM pg_database WHERE datallowconn AND NOT datistemplate ORDER BY datname"
 	case "mysql", "mariadb":
 		query = "SELECT CAST(schema_name AS CHAR) FROM information_schema.schemata ORDER BY schema_name"
-	case "snowflake":
-		query = "SELECT database_name FROM information_schema.databases ORDER BY database_name"
 	case "mssql", "sqlserver":
 		query = "SELECT name FROM sys.databases WHERE state_desc='ONLINE' ORDER BY name"
 	default:
@@ -162,9 +160,6 @@ func schemaColumnsQuery(engine string) (string, error) {
 	query := `SELECT table_schema,table_name,column_name,data_type,is_nullable FROM information_schema.columns`
 	orderBy := " ORDER BY table_schema,table_name,ordinal_position"
 	switch engine {
-	case "snowflake":
-		query = `SELECT table_schema,table_name,column_name,data_type,is_nullable,column_default,CASE WHEN is_identity='YES' THEN 'identity' ELSE '' END,comment FROM information_schema.columns WHERE table_schema != 'INFORMATION_SCHEMA'`
-		orderBy = " ORDER BY table_schema,table_name,ordinal_position"
 	case "postgres":
 		query = `SELECT cols.table_schema,cols.table_name,cols.column_name,pg_catalog.format_type(a.atttypid,a.atttypmod),cols.is_nullable,cols.column_default,CASE WHEN cols.is_identity='YES' THEN 'identity '||cols.identity_generation WHEN cols.is_generated='ALWAYS' THEN 'generated: '||COALESCE(cols.generation_expression,'') ELSE '' END,pg_catalog.col_description(c.oid,a.attnum)
 		FROM information_schema.columns cols
@@ -335,11 +330,6 @@ func loadForeignKeys(ctx context.Context, db *sql.DB, engine string) (map[string
 		query = `SELECT CAST(table_schema AS CHAR),CAST(table_name AS CHAR),CAST(column_name AS CHAR),CAST(referenced_table_schema AS CHAR),CAST(referenced_table_name AS CHAR),CAST(referenced_column_name AS CHAR) FROM information_schema.key_column_usage WHERE table_schema=DATABASE() AND referenced_table_name IS NOT NULL`
 	case "mssql", "sqlserver":
 		query = `SELECT s.name,t.name,c.name,rs.name,rt.name,rc.name FROM sys.foreign_key_columns fkc JOIN sys.tables t ON t.object_id=fkc.parent_object_id JOIN sys.schemas s ON s.schema_id=t.schema_id JOIN sys.columns c ON c.object_id=fkc.parent_object_id AND c.column_id=fkc.parent_column_id JOIN sys.tables rt ON rt.object_id=fkc.referenced_object_id JOIN sys.schemas rs ON rs.schema_id=rt.schema_id JOIN sys.columns rc ON rc.object_id=fkc.referenced_object_id AND rc.column_id=fkc.referenced_column_id`
-	case "snowflake":
-		query = `SELECT fk.table_schema,fk.table_name,fk.column_name,pk.table_schema,pk.table_name,pk.column_name
-			FROM information_schema.referential_constraints rc
-			JOIN information_schema.key_column_usage fk ON fk.constraint_catalog=rc.constraint_catalog AND fk.constraint_schema=rc.constraint_schema AND fk.constraint_name=rc.constraint_name
-			JOIN information_schema.key_column_usage pk ON pk.constraint_catalog=rc.unique_constraint_catalog AND pk.constraint_schema=rc.unique_constraint_schema AND pk.constraint_name=rc.unique_constraint_name AND pk.ordinal_position=fk.ordinal_position`
 	}
 	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
@@ -369,8 +359,6 @@ func loadIndexes(ctx context.Context, db *sql.DB, engine string, schema *Schema)
 		query = `SELECT CAST(table_schema AS CHAR),CAST(table_name AS CHAR),CAST(index_name AS CHAR),(non_unique=0),(index_name='PRIMARY'),CAST(column_name AS CHAR) FROM information_schema.statistics WHERE table_schema=DATABASE() ORDER BY table_schema,table_name,index_name,seq_in_index`
 	case "mssql", "sqlserver":
 		query = `SELECT s.name,t.name,i.name,i.is_unique,i.is_primary_key,c.name,ic.is_included_column,i.filter_definition FROM sys.indexes i JOIN sys.tables t ON t.object_id=i.object_id JOIN sys.schemas s ON s.schema_id=t.schema_id JOIN sys.index_columns ic ON ic.object_id=i.object_id AND ic.index_id=i.index_id JOIN sys.columns c ON c.object_id=ic.object_id AND c.column_id=ic.column_id WHERE i.name IS NOT NULL ORDER BY s.name,t.name,i.name,ic.is_included_column,ic.key_ordinal,ic.index_column_id`
-	case "snowflake":
-		query = `SELECT table_schema,table_name,index_name,is_unique='YES',FALSE,name,is_included_column='YES',NULL FROM information_schema.index_columns WHERE table_schema <> 'INFORMATION_SCHEMA' ORDER BY table_schema,table_name,index_name,is_included_column,key_sequence`
 	}
 	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
@@ -383,7 +371,7 @@ func loadIndexes(ctx context.Context, db *sql.DB, engine string, schema *Schema)
 		var included bool
 		var filter sql.NullString
 		var err error
-		if engine == "mssql" || engine == "sqlserver" || engine == "snowflake" {
+		if engine == "mssql" || engine == "sqlserver" {
 			err = rows.Scan(&schemaName, &table, &name, &unique, &primary, &column, &included, &filter)
 		} else {
 			err = rows.Scan(&schemaName, &table, &name, &unique, &primary, &column)
@@ -425,8 +413,6 @@ func loadViews(ctx context.Context, db *sql.DB, engine string, schema *Schema) e
 		query += " WHERE table_schema=DATABASE()"
 	} else if engine == "mssql" || engine == "sqlserver" {
 		query = "SELECT s.name,v.name FROM sys.views v JOIN sys.schemas s ON s.schema_id=v.schema_id WHERE v.is_ms_shipped=0"
-	} else if engine == "snowflake" {
-		query += " WHERE table_schema <> 'INFORMATION_SCHEMA'"
 	}
 	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
@@ -453,8 +439,6 @@ func loadSequences(ctx context.Context, db *sql.DB, engine string, schema *Schem
 		query = "SELECT table_schema,table_name FROM information_schema.tables WHERE table_type='SEQUENCE' AND table_schema=DATABASE()"
 	case "mssql", "sqlserver":
 		query = "SELECT s.name,q.name FROM sys.sequences q JOIN sys.schemas s ON s.schema_id=q.schema_id"
-	case "snowflake":
-		query = "SELECT sequence_schema,sequence_name FROM information_schema.sequences WHERE sequence_schema <> 'INFORMATION_SCHEMA'"
 	default:
 		return nil
 	}
@@ -477,9 +461,6 @@ func loadRoutines(ctx context.Context, db *sql.DB, engine string, schema *Schema
 	var query string
 	if engine == "mssql" || engine == "sqlserver" {
 		query = `SELECT s.name,o.name,CASE WHEN RTRIM(o.type)='P' THEN 'procedure' ELSE 'function' END FROM sys.objects o JOIN sys.schemas s ON s.schema_id=o.schema_id WHERE o.type IN ('P','FN','IF','TF') ORDER BY s.name,o.name`
-	} else if engine == "snowflake" {
-		query = `SELECT routine_schema,routine_name,LOWER(routine_type) FROM information_schema.routines WHERE routine_schema <> 'INFORMATION_SCHEMA'
-			UNION ALL SELECT procedure_schema,procedure_name,'procedure' FROM information_schema.procedures WHERE procedure_schema <> 'INFORMATION_SCHEMA'`
 	} else {
 		query = "SELECT routine_schema,routine_name,LOWER(routine_type) FROM information_schema.routines"
 		if engine == "postgres" {
@@ -505,9 +486,6 @@ func loadRoutines(ctx context.Context, db *sql.DB, engine string, schema *Schema
 }
 
 func loadTriggers(ctx context.Context, db *sql.DB, engine string, schema *Schema) error {
-	if engine == "snowflake" {
-		return nil
-	}
 	var query string
 	if engine == "mssql" || engine == "sqlserver" {
 		query = `SELECT s.name,tr.name,t.name,CASE WHEN tr.is_instead_of_trigger=1 THEN 'INSTEAD OF' ELSE 'AFTER' END,te.type_desc FROM sys.triggers tr JOIN sys.tables t ON t.object_id=tr.parent_id JOIN sys.schemas s ON s.schema_id=t.schema_id JOIN sys.trigger_events te ON te.object_id=tr.object_id ORDER BY s.name,t.name,tr.name`

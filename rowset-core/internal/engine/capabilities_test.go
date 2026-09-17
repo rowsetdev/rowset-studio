@@ -3,9 +3,6 @@ package engine
 import "testing"
 
 func TestEngineCapabilitiesDoNotAdvertiseUnsupportedControls(t *testing.T) {
-	if capability := EngineCapabilities("snowflake"); capability.DDL || capability.Explain || capability.CSVImport {
-		t.Fatalf("Snowflake advertises unsupported controls: %+v", capability)
-	}
 	if capability := EngineCapabilities("cockroachdb"); !capability.Explain || capability.ExplainAnalyze {
 		t.Fatalf("CockroachDB plan capabilities are inconsistent: %+v", capability)
 	}
@@ -39,7 +36,7 @@ func TestEngineCapabilitiesDoNotAdvertiseUnsupportedControls(t *testing.T) {
 }
 
 func TestScheduledSQLUsesOnlyPooledEngines(t *testing.T) {
-	for _, name := range []string{"postgres", "sqlite", "duckdb", "clickhouse", "snowflake"} {
+	for _, name := range []string{"postgres", "sqlite", "duckdb", "clickhouse"} {
 		if !SupportsScheduledSQL(name) {
 			t.Errorf("%s has a pooled SQL query path", name)
 		}
@@ -53,7 +50,7 @@ func TestScheduledSQLUsesOnlyPooledEngines(t *testing.T) {
 
 func TestAllEngineCapabilitiesIncludesEveryConnectionEngine(t *testing.T) {
 	capabilities := AllEngineCapabilities()
-	for _, name := range []string{"postgres", "mysql", "mariadb", "mssql", "cockroachdb", "snowflake", "sqlite", "duckdb", "clickhouse", "mongodb", "redis", "valkey", "cassandra", "elasticsearch"} {
+	for _, name := range []string{"postgres", "mysql", "mariadb", "mssql", "cockroachdb", "sqlite", "duckdb", "clickhouse", "mongodb", "redis", "valkey", "cassandra", "elasticsearch"} {
 		if _, ok := capabilities[name]; !ok {
 			t.Errorf("missing %s", name)
 		}

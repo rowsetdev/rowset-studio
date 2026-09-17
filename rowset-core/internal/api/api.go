@@ -164,6 +164,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/connections/{id}/ddl", s.authenticated(http.HandlerFunc(s.objectDDL)))
 	mux.Handle("GET /api/connections/{id}/databases", s.authenticated(http.HandlerFunc(s.listDatabases)))
 	mux.Handle("POST /api/connections/{id}/documents/find", s.authenticated(http.HandlerFunc(s.mongoFind)))
+	mux.Handle("POST /api/connections/{id}/documents/aggregate", s.authenticated(http.HandlerFunc(s.mongoAggregate)))
 	mux.Handle("POST /api/connections/{id}/documents/insert", s.authenticated(http.HandlerFunc(s.mongoInsert)))
 	mux.Handle("POST /api/connections/{id}/documents/update", s.authenticated(http.HandlerFunc(s.mongoUpdate)))
 	mux.Handle("POST /api/connections/{id}/documents/delete", s.authenticated(http.HandlerFunc(s.mongoDelete)))

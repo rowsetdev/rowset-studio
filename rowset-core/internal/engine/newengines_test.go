@@ -302,19 +302,19 @@ func TestLiveElasticsearch(t *testing.T) {
 	if _, ok := schema.Tables["elasticsearch.rowset-probe"]; !ok {
 		t.Fatalf("expected rowset-probe index in schema: %#v", schema.Tables)
 	}
-	docs, _, err := NewManager().ElasticsearchSearch(ctx, c, ElasticsearchSearchInput{Index: "rowset-probe", Size: 10})
+	result, err := NewManager().ElasticsearchSearch(ctx, c, ElasticsearchSearchInput{Index: "rowset-probe", Size: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(docs) != 1 {
-		t.Fatalf("expected 1 document, got %d", len(docs))
+	if len(result.Documents) != 1 {
+		t.Fatalf("expected 1 document, got %d", len(result.Documents))
 	}
 	var decoded map[string]json.RawMessage
-	if err := json.Unmarshal(docs[0], &decoded); err != nil {
+	if err := json.Unmarshal(result.Documents[0], &decoded); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := decoded["_source"]; !ok {
-		t.Fatalf("expected _source in hit: %s", docs[0])
+		t.Fatalf("expected _source in hit: %s", result.Documents[0])
 	}
 }
 

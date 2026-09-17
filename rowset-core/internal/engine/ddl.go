@@ -28,8 +28,6 @@ func (m *Manager) ObjectDDL(ctx context.Context, connection Connection, kind, sc
 		return "", errors.New("object name is required")
 	}
 	switch engine {
-	case "snowflake":
-		return "", errors.New("DDL viewing is not available for Snowflake yet")
 	case "mysql", "mariadb":
 		return mysqlDDL(ctx, db, kind, schemaName, name)
 	case "mssql", "sqlserver":

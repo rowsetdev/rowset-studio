@@ -25,7 +25,6 @@ import (
 	"github.com/jackc/pgx/v5/stdlib"
 	mssql "github.com/microsoft/go-mssqldb"
 	"github.com/microsoft/go-mssqldb/msdsn"
-	sf "github.com/snowflakedb/gosnowflake"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -1031,11 +1030,6 @@ func openDatabase(connection Connection, tunnel *ssh.Client) (*sql.DB, error) {
 			connector.Dialer = sshMSSQLDialer{tunnel}
 		}
 		return sql.OpenDB(connector), nil
-	case "snowflake":
-		if tunnel != nil {
-			return nil, errors.New("Snowflake does not support SSH tunnelling; it is only reachable over the public internet")
-		}
-		return sql.Open("snowflake", dsn)
 	default:
 		return nil, fmt.Errorf("unsupported engine: %s", connection.Engine)
 	}
@@ -1077,15 +1071,6 @@ func connectionString(connection Connection) (string, string, error) {
 		q.Set("encrypt", "disable")
 		u.RawQuery = q.Encode()
 		return "sqlserver", u.String(), nil
-	case "snowflake":
-		// The account identifier goes in the Host field (e.g.
-		// "myorg-myaccount"); Snowflake is always reached over HTTPS on its
-		// own infrastructure, so Port and TLS settings do not apply.
-		dsn, err := sf.DSN(&sf.Config{Account: connection.Host, User: connection.Username, Password: connection.Password, Database: connection.Database})
-		if err != nil {
-			return "", "", err
-		}
-		return "snowflake", dsn, nil
 	default:
 		return "", "", fmt.Errorf("unsupported engine: %s", connection.Engine)
 	}

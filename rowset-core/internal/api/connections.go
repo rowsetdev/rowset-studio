@@ -824,7 +824,7 @@ func normalizeConnectionInput(input connectionInput, existing *domain.Connection
 	if input.Engine == "sqlserver" {
 		input.Engine = "mssql"
 	}
-	defaults := map[string]string{"postgres": "postgres", "mysql": "mysql", "mariadb": "mysql", "mssql": "master", "sqlite": "", "duckdb": "", "clickhouse": "default", "mongodb": "admin", "cockroachdb": "defaultdb", "redis": "0", "valkey": "0", "cassandra": "system", "elasticsearch": "", "snowflake": ""}
+	defaults := map[string]string{"postgres": "postgres", "mysql": "mysql", "mariadb": "mysql", "mssql": "master", "sqlite": "", "duckdb": "", "clickhouse": "default", "mongodb": "admin", "cockroachdb": "defaultdb", "redis": "0", "valkey": "0", "cassandra": "system", "elasticsearch": ""}
 	defaultDB, ok := defaults[input.Engine]
 	if !ok {
 		return domain.Connection{}, nil, "unsupported database engine"

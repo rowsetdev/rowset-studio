@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router";
-import { type ComponentType, useState } from "react";
+import { type ComponentType, useEffect, useState } from "react";
 import { Button, Input, PageHeader, Panel, Select } from "../../components/ui";
 import { EnvBadge } from "../../components/EnvBadge";
 import { Icon } from "../../components/Icon";
@@ -31,6 +31,8 @@ export default function ConnectionsPage() {
   const [engine, setEngine] = useState("all");
   const [environment, setEnvironment] = useState("all");
   const [search, setSearch] = useState("");
+  // Bumped to tell every visible row to (re)test; rows react to it in an effect.
+  const [testAllToken, setTestAllToken] = useState(0);
   const rows = (connections ?? []).filter((c) => {
     if (engine !== "all" && c.engine !== engine) return false;
     if (environment !== "all" && c.environment !== environment) return false;
@@ -44,7 +46,14 @@ export default function ConnectionsPage() {
         icon="plug"
         title="Connections"
         subtitle={subtitle}
-        actions={isAdmin ? <Button onClick={() => setShowForm(true)}>New connection</Button> : undefined}
+        actions={isAdmin ? (
+          <div className="flex items-center gap-2">
+            {rows.length > 0 && <button type="button" onClick={() => setTestAllToken((t) => t + 1)} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 text-[12px] font-medium text-slate-600 transition hover:bg-slate-50 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800">
+              <Icon name="check" size={13} /> Test all ({rows.length})
+            </button>}
+            <Button onClick={() => setShowForm(true)}>New connection</Button>
+          </div>
+        ) : undefined}
       />
 
       <Panel className="grid gap-2 p-2.5 md:grid-cols-[180px_160px_minmax(0,1fr)]">
@@ -54,7 +63,7 @@ export default function ConnectionsPage() {
           <option value="mssql">SQL Server</option>
           <option value="mysql">MySQL</option>
           <option value="mariadb">MariaDB</option>
-          <option value="sqlite">SQLite</option><option value="duckdb">DuckDB</option><option value="clickhouse">ClickHouse</option><option value="mongodb">MongoDB</option><option value="cockroachdb">CockroachDB</option><option value="snowflake">Snowflake</option><option value="redis">Redis</option><option value="valkey">Valkey</option><option value="cassandra">Cassandra</option><option value="elasticsearch">Elasticsearch</option>
+          <option value="sqlite">SQLite</option><option value="duckdb">DuckDB</option><option value="clickhouse">ClickHouse</option><option value="mongodb">MongoDB</option><option value="cockroachdb">CockroachDB</option><option value="redis">Redis</option><option value="valkey">Valkey</option><option value="cassandra">Cassandra</option><option value="elasticsearch">Elasticsearch</option>
         </Select>
         <Select value={environment} onChange={(e) => setEnvironment(e.target.value)}>
           <option value="all">All environments</option>
@@ -89,7 +98,7 @@ export default function ConnectionsPage() {
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {rows.map((c) => (
-                <ConnectionRow key={c.id} conn={c} isAdmin={isAdmin} Address={address?.cell} actions={actions} />
+                <ConnectionRow key={c.id} conn={c} isAdmin={isAdmin} Address={address?.cell} actions={actions} testAllToken={testAllToken} />
               ))}
             </tbody>
           </table>
@@ -106,16 +115,24 @@ function ConnectionRow({
   isAdmin,
   Address,
   actions,
+  testAllToken,
 }: {
   conn: Connection;
   isAdmin: boolean;
   Address?: ComponentType<{ connection: Connection; isAdmin: boolean }>;
   actions: ComponentType<{ connection: Connection }>[];
+  testAllToken: number;
 }) {
   const navigate = useNavigate();
   const test = useTestConnection();
   const del = useDeleteConnection();
   const [editing, setEditing] = useState(false);
+
+  useEffect(() => {
+    if (testAllToken > 0) test.mutate(conn.id);
+    // Runs once per bump of the shared token; test.mutate is stable across renders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [testAllToken]);
 
   return (
     <tr className="text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-900/70">

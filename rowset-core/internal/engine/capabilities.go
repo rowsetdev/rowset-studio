@@ -28,8 +28,6 @@ func EngineCapabilities(name string) Capabilities {
 		return Capabilities{Transactions: true, Explain: true, ExplainAnalyze: true, DDL: true, CSVImport: true, CSVExport: true, JSONExport: true, SQLExport: true, SSH: true, Shared: true, MultiNode: true}
 	case "cockroachdb":
 		return Capabilities{Transactions: true, Explain: true, DDL: true, CSVImport: true, CSVExport: true, JSONExport: true, SQLExport: true, SSH: true, Shared: true, MultiNode: true}
-	case "snowflake":
-		return Capabilities{CSVExport: true, JSONExport: true, SQLExport: true, Shared: true}
 	case "sqlite", "duckdb":
 		return Capabilities{Transactions: true, DDL: true, CSVImport: true, CSVExport: true, JSONExport: true}
 	case "clickhouse":
@@ -47,7 +45,7 @@ func EngineCapabilities(name string) Capabilities {
 
 func AllEngineCapabilities() map[string]Capabilities {
 	result := map[string]Capabilities{}
-	for _, name := range []string{"postgres", "mysql", "mariadb", "mssql", "cockroachdb", "snowflake", "sqlite", "duckdb", "clickhouse", "mongodb", "redis", "valkey", "cassandra", "elasticsearch"} {
+	for _, name := range []string{"postgres", "mysql", "mariadb", "mssql", "cockroachdb", "sqlite", "duckdb", "clickhouse", "mongodb", "redis", "valkey", "cassandra", "elasticsearch"} {
 		result[name] = EngineCapabilities(name)
 	}
 	return result

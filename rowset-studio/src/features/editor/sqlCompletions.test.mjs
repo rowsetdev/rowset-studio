@@ -35,7 +35,7 @@ test('SQL Server completion quotes identifiers and uses loaded database schemas'
 });
 
 test('completion quotes names with every supported SQL dialect', () => {
-  for (const engine of ['postgres', 'postgresql', 'cockroachdb', 'sqlite', 'duckdb', 'clickhouse', 'snowflake', 'cassandra']) {
+  for (const engine of ['postgres', 'postgresql', 'cockroachdb', 'sqlite', 'duckdb', 'clickhouse', 'cassandra']) {
     assert.equal(completionName('Sales.Order "new"', engine), '"Sales"."Order ""new"""');
   }
   for (const engine of ['mysql', 'mariadb']) {

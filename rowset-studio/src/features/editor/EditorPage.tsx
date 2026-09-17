@@ -21,7 +21,7 @@ import { useSchema } from "./useEditor";
 import { formatSql, statementAt, splitStatements } from "./sqlText";
 import { useAuth } from "../../lib/auth";
 import { SchemaActions } from "./schemaActions";
-import { mongoQuery, mongoRequest, formatMongoQuery } from "./mongoQuery";
+import { mongoQuery, mongoRequest, formatMongoQuery, isMongoAggregateShellQuery, mongoAggregateRequest } from "./mongoQuery";
 import MongoQueryBar from "./MongoQueryBar";
 import RedisQueryBar, { redisQuery } from "./RedisQueryBar";
 import ElasticsearchQueryBar, { elasticsearchQuery } from "./ElasticsearchQueryBar";
@@ -521,12 +521,21 @@ function EditorWorkspace({ snapshot, initial }: { snapshot: WorkspaceSnapshot; i
     // A restore script puts rows back; backing it up again would only add noise.
     const backup = !skipBackup && !shared && !activeTab?.restoreOf && rowBackupEnabled();
     const runMongo = async (): Promise<QueryResult> => {
-      const response = await api<{ documents: unknown[]; truncated: boolean; durationMs: number; limit: number }>(`/connections/${connectionId}/documents/find`, { method: "POST", signal: controller.signal, body: mongoRequest(sql, selectedDb) });
+      const aggregate = isMongoAggregateShellQuery(sql);
+      const path = aggregate ? "aggregate" : "find";
+      const body = aggregate ? mongoAggregateRequest(sql, selectedDb) : mongoRequest(sql, selectedDb);
+      const response = await api<{ documents: unknown[]; truncated: boolean; durationMs: number; limit: number }>(`/connections/${connectionId}/documents/${path}`, { method: "POST", signal: controller.signal, body });
       return { columns: ["document"], columnTypes: ["BSON"], rows: response.documents.map(document => [document]), rowCount: response.documents.length, durationMs: response.durationMs, truncated: response.truncated, policyNotice: response.truncated ? `Document limit: ${response.limit}` : undefined };
     };
     const runElasticsearch = async (): Promise<QueryResult> => {
-      const response = await api<{ documents: unknown[]; truncated: boolean; durationMs: number; limit: number }>(`/connections/${connectionId}/elasticsearch/search`, { method: "POST", signal: controller.signal, body: sql });
-      return { columns: ["document"], columnTypes: ["JSON"], rows: response.documents.map(document => [document]), rowCount: response.documents.length, durationMs: response.durationMs, truncated: response.truncated, policyNotice: response.truncated ? `Result size: ${response.limit}` : undefined };
+      const response = await api<{ documents: unknown[]; truncated: boolean; aggregations?: unknown; searchAfter?: unknown; durationMs: number; limit: number }>(`/connections/${connectionId}/elasticsearch/search`, { method: "POST", signal: controller.signal, body: sql });
+      // Aggregations and the sort values for the next search_after page have
+      // no column of their own, so they show as one leading pseudo-document.
+      const meta = response.aggregations !== undefined || response.searchAfter !== undefined
+        ? [{ _aggregations: response.aggregations, _searchAfter: response.searchAfter }]
+        : [];
+      const documents = [...meta, ...response.documents];
+      return { columns: ["document"], columnTypes: ["JSON"], rows: documents.map(document => [document]), rowCount: documents.length, durationMs: response.durationMs, truncated: response.truncated, policyNotice: response.truncated ? `Result size: ${response.limit}` : undefined };
     };
     const runRedis = async (): Promise<QueryResult> => {
       const input = JSON.parse(sql) as { pattern?: string; type?: string; limit?: number };

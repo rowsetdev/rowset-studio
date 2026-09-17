@@ -4,15 +4,24 @@ export function elasticsearchQuery() {
   return `{"index":"","query":{"match_all":{}},"size":100}`;
 }
 
-interface EsParts { index: string; query: string; size: string }
+interface EsParts {
+  index: string;
+  query: string;
+  size: string;
+  // sort/searchAfter/aggs are edited only in the raw JSON below the bar;
+  // this keeps them intact when the bar's own fields are changed.
+  rest: Record<string, unknown>;
+}
 
 function toParts(sql: string): EsParts {
   const parsed = JSON.parse(sql);
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("not an object");
+  const { index, query, size, ...rest } = parsed;
   return {
-    index: typeof parsed.index === "string" ? parsed.index : "",
-    query: parsed.query != null ? JSON.stringify(parsed.query) : "{}",
-    size: parsed.size != null ? String(parsed.size) : "100",
+    index: typeof index === "string" ? index : "",
+    query: query != null ? JSON.stringify(query) : "{}",
+    size: size != null ? String(size) : "100",
+    rest,
   };
 }
 
@@ -26,13 +35,14 @@ function toSql(parts: EsParts): string {
   const fields = [`"index":${JSON.stringify(parts.index.trim())}`];
   fields.push(`"query":${query !== undefined ? JSON.stringify(query) : parts.query}`);
   fields.push(`"size":${Number(parts.size) > 0 ? Number(parts.size) : 100}`);
+  for (const [key, value] of Object.entries(parts.rest)) fields.push(`${JSON.stringify(key)}:${JSON.stringify(value)}`);
   return `{${fields.join(",")}}`;
 }
 
 // A bar for Elasticsearch _search: index, a JSON query body and a size,
 // kept in sync with the raw {index,query,size} JSON below it.
 export default function ElasticsearchQueryBar({ tabKey, sql, onChange, onRun }: { tabKey: string; sql: string; onChange: (sql: string) => void; onRun: () => void }) {
-  const [parts, setParts] = useState<EsParts>({ index: "", query: '{"match_all":{}}', size: "100" });
+  const [parts, setParts] = useState<EsParts>({ index: "", query: '{"match_all":{}}', size: "100", rest: {} });
 
   useEffect(() => {
     try { setParts(toParts(sql)); } catch { /* keep last valid parts while the JSON is mid-edit */ }

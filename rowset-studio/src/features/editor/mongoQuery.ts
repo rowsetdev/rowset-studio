@@ -184,9 +184,46 @@ export function mongoRequest(source: string, database: string): string {
   return `{${normalized.trim().slice(1, -1)},"database":${JSON.stringify(database)}}`;
 }
 
+const SHELL_AGGREGATE_QUERY = /^\s*db\s*\.\s*([A-Za-z0-9_$]+)\s*\.\s*aggregate\s*\(/;
+
+export function isMongoAggregateShellQuery(source: string): boolean {
+  return SHELL_AGGREGATE_QUERY.test(source);
+}
+
+export function mongoAggregateQuery(collection = "") {
+  return `db.${collection || "collection"}.aggregate([\n  \n])`;
+}
+
+// Parse `db.<collection>.aggregate([...])` into the {collection,pipeline}
+// request object the backend expects. Only the pipeline array itself is
+// taken as-is; there is no field-by-field bar for aggregation stages.
+export function mongoAggregateShellToRequest(source: string): string {
+  const match = SHELL_AGGREGATE_QUERY.exec(source);
+  if (!match) throw new Error("Query must start with db.<collection>.aggregate([...])");
+  const collection = match[1];
+  const openIdx = match[0].length - 1;
+  const { args, endIdx } = extractCall(source, openIdx);
+  const rest = source.slice(endIdx).trim().replace(/;$/, "").trim();
+  if (rest) throw new Error(`Unsupported query syntax: ${rest}`);
+  const pipeline = args.trim();
+  if (!pipeline.startsWith("[")) throw new Error("aggregate() takes one array of stages.");
+  return `{"collection":${JSON.stringify(collection)},"pipeline":${pipeline}}`;
+}
+
+// Validate without reserializing, so large BSON numbers in the pipeline
+// keep their original digits on their way to the server.
+export function mongoAggregateRequest(source: string, database: string): string {
+  const normalized = mongoAggregateShellToRequest(source);
+  const query = JSON.parse(normalized);
+  if (typeof query.collection !== "string" || !query.collection.trim()) throw new Error("Choose a collection in the query, or open one from the explorer.");
+  if (!Array.isArray(query.pipeline) || query.pipeline.length === 0) throw new Error("The pipeline must be a non-empty array of stages.");
+  return `{${normalized.trim().slice(1, -1)},"database":${JSON.stringify(database)}}`;
+}
+
 // Format punctuation and whitespace without parsing numbers into JS doubles.
 export function formatMongoQuery(source: string): string {
   if (isMongoShellQuery(source)) { JSON.parse(mongoShellToRequest(source)); return source.trim(); }
+  if (isMongoAggregateShellQuery(source)) { JSON.parse(mongoAggregateShellToRequest(source)); return source.trim(); }
   JSON.parse(source); // Validate syntax only.
   const tokens = source.match(/"(?:[^"\\]|\\.)*"|[^\s]/g) ?? [];
   let depth = 0, result = "";

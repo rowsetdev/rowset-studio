@@ -212,38 +212,64 @@ func (m *Manager) ElasticsearchDelete(ctx context.Context, connection Connection
 type ElasticsearchSearchInput struct {
 	Index string          `json:"index"`
 	Query json.RawMessage `json:"query"`
-	Size  int             `json:"size"`
+	// Sort orders hits and, together with SearchAfter, pages past size/10000
+	// without deep pagination's from+size cost or its 10000-result limit.
+	Sort json.RawMessage `json:"sort"`
+	// SearchAfter continues from the last page's sort values (its response's
+	// SearchAfter field); it requires Sort to be set the same way each page.
+	SearchAfter json.RawMessage `json:"searchAfter"`
+	// Aggs runs alongside the query; its result comes back verbatim.
+	Aggs json.RawMessage `json:"aggs"`
+	Size int             `json:"size"`
+}
+
+type ElasticsearchSearchResult struct {
+	Documents    []json.RawMessage `json:"documents"`
+	Truncated    bool              `json:"truncated"`
+	Aggregations json.RawMessage   `json:"aggregations,omitempty"`
+	// SearchAfter is the last hit's sort values; pass it back as the next
+	// page's SearchAfter to continue, when Sort was set on this call.
+	SearchAfter json.RawMessage `json:"searchAfter,omitempty"`
 }
 
 // ElasticsearchSearch runs a single search request body against one index.
 // Only _search, _doc and _update are exposed (never _delete_by_query or
 // other bulk/scripted write APIs); each call's guardrail statement gates
 // whether it runs.
-func (m *Manager) ElasticsearchSearch(ctx context.Context, connection Connection, input ElasticsearchSearchInput) ([]json.RawMessage, bool, error) {
+func (m *Manager) ElasticsearchSearch(ctx context.Context, connection Connection, input ElasticsearchSearchInput) (ElasticsearchSearchResult, error) {
 	if strings.TrimSpace(input.Index) == "" {
-		return nil, false, errors.New("index is required")
+		return ElasticsearchSearchResult{}, errors.New("index is required")
 	}
 	if input.Size <= 0 {
 		input.Size = 100
 	}
 	if input.Size > 10000 {
-		return nil, false, errors.New("size must be 10000 or less")
+		return ElasticsearchSearchResult{}, errors.New("size must be 10000 or less")
+	}
+	if len(input.SearchAfter) > 0 && len(input.Sort) == 0 {
+		return ElasticsearchSearchResult{}, errors.New("searchAfter requires sort")
 	}
 	body := map[string]any{"size": input.Size}
-	if len(input.Query) > 0 {
-		var query any
-		if err := json.Unmarshal(input.Query, &query); err != nil {
-			return nil, false, fmt.Errorf("query must be a JSON object: %w", err)
+	for _, field := range []struct {
+		name  string
+		value json.RawMessage
+	}{{"query", input.Query}, {"sort", input.Sort}, {"search_after", input.SearchAfter}, {"aggs", input.Aggs}} {
+		if len(field.value) == 0 {
+			continue
 		}
-		body["query"] = query
+		var decoded any
+		if err := json.Unmarshal(field.value, &decoded); err != nil {
+			return ElasticsearchSearchResult{}, fmt.Errorf("%s must be valid JSON: %w", field.name, err)
+		}
+		body[field.name] = decoded
 	}
 	encoded, err := json.Marshal(body)
 	if err != nil {
-		return nil, false, err
+		return ElasticsearchSearchResult{}, err
 	}
 	client, err := elasticsearchClient(connection)
 	if err != nil {
-		return nil, false, err
+		return ElasticsearchSearchResult{}, err
 	}
 	res, err := client.Search(
 		client.Search.WithContext(ctx),
@@ -252,18 +278,31 @@ func (m *Manager) ElasticsearchSearch(ctx context.Context, connection Connection
 	)
 	decoded, err := esRequest(ctx, client, res, err)
 	if err != nil {
-		return nil, false, err
+		return ElasticsearchSearchResult{}, err
 	}
 	hitsWrap, _ := decoded["hits"].(map[string]any)
 	hits, _ := hitsWrap["hits"].([]any)
 	docs := make([]json.RawMessage, 0, len(hits))
+	var lastSort json.RawMessage
 	for _, hit := range hits {
 		raw, err := json.Marshal(hit)
 		if err != nil {
 			continue
 		}
 		docs = append(docs, raw)
+		if hitMap, ok := hit.(map[string]any); ok {
+			if sort, ok := hitMap["sort"]; ok {
+				if sortRaw, err := json.Marshal(sort); err == nil {
+					lastSort = sortRaw
+				}
+			}
+		}
 	}
-	truncated := len(docs) == input.Size
-	return docs, truncated, nil
+	result := ElasticsearchSearchResult{Documents: docs, Truncated: len(docs) == input.Size, SearchAfter: lastSort}
+	if aggs, ok := decoded["aggregations"]; ok {
+		if raw, err := json.Marshal(aggs); err == nil {
+			result.Aggregations = raw
+		}
+	}
+	return result, nil
 }
