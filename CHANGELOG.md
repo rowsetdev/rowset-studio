@@ -5,6 +5,11 @@ and `scripts/package-macos.sh` stamp it into Studio (sidebar), the `rowset`
 executable and the macOS app. Every change set bumps the patch version and adds
 an entry here.
 
+## 0.0.91 — 2026-09-17
+
+- Added pagination to the Activity statements table: 20 rows per page with
+  Previous/Next, resetting to page 1 whenever a filter changes.
+
 ## 0.0.90 — 2026-09-17
 
 - Added MongoDB manual-commit transactions: the toolbar's manual-commit

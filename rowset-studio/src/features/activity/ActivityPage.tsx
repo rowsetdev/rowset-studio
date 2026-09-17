@@ -11,6 +11,7 @@ import RowBackups from "./RowBackups";
 
 const RANGES = { "24h": 24 * 60 * 60 * 1000, "7d": 7 * 24 * 60 * 60 * 1000, "30d": 30 * 24 * 60 * 60 * 1000 } as const;
 type Range = keyof typeof RANGES;
+const PAGE_SIZE = 20;
 
 // Personal activity: the signed-in user's own statements across connections.
 export default function ActivityPage() {
@@ -19,6 +20,7 @@ export default function ActivityPage() {
   const [status, setStatus] = useState("");
   const [search, setSearch] = useState("");
   const [view, setView] = useState<"statements" | "backups">("statements");
+  const [page, setPage] = useState(0);
   const shared = useShared();
   const navigate = useNavigate();
   const { data: connections = [] } = useConnections();
@@ -32,6 +34,11 @@ export default function ActivityPage() {
     (!connectionId || item.connectionId === connectionId) &&
     (!status || item.status === status) &&
     (!needle || item.sql.toLowerCase().includes(needle)));
+  const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount - 1);
+  const pageRows = rows.slice(currentPage * PAGE_SIZE, currentPage * PAGE_SIZE + PAGE_SIZE);
+  // Any change that reshuffles which rows match should land back on page 1.
+  const resetPage = (fn: () => void) => { fn(); setPage(0); };
 
   return (
     <div className="space-y-3">
@@ -60,19 +67,19 @@ export default function ActivityPage() {
       <Panel className="flex flex-wrap items-center gap-2 p-2.5">
         <div className="relative min-w-[220px] flex-1">
           <Icon name="search" size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
-          <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search SQL…" aria-label="Search SQL" className="pl-8" />
+          <Input value={search} onChange={(event) => resetPage(() => setSearch(event.target.value))} placeholder="Search SQL…" aria-label="Search SQL" className="pl-8" />
         </div>
-        <Select aria-label="Connection" value={connectionId} onChange={(event) => setConnectionId(event.target.value)} className="w-52">
+        <Select aria-label="Connection" value={connectionId} onChange={(event) => resetPage(() => setConnectionId(event.target.value))} className="w-52">
           <option value="">All connections</option>
           {connections.map((connection) => <option key={connection.id} value={connection.id}>{connection.name}</option>)}
         </Select>
-        <Select aria-label="Status" value={status} onChange={(event) => setStatus(event.target.value)} className="w-36">
+        <Select aria-label="Status" value={status} onChange={(event) => resetPage(() => setStatus(event.target.value))} className="w-36">
           <option value="">All statuses</option>
           <option value="success">Succeeded</option>
           <option value="error">Failed</option>
           <option value="blocked">Blocked by policy</option>
         </Select>
-        <Select aria-label="Time range" value={range} onChange={(event) => setRange(event.target.value as Range)} className="w-36">
+        <Select aria-label="Time range" value={range} onChange={(event) => resetPage(() => setRange(event.target.value as Range))} className="w-36">
           <option value="24h">Last 24 hours</option>
           <option value="7d">Last 7 days</option>
           <option value="30d">Last 30 days</option>
@@ -101,7 +108,7 @@ export default function ActivityPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {rows.map((item) => {
+                {pageRows.map((item) => {
                   const connection = item.connectionId ? byId.get(item.connectionId) : undefined;
                   return (
                     <tr key={item.id} className="group hover:bg-slate-50 dark:hover:bg-slate-900/40">
@@ -126,6 +133,16 @@ export default function ActivityPage() {
                 })}
               </tbody>
             </table>
+          </div>
+        )}
+        {rows.length > PAGE_SIZE && (
+          <div className="flex items-center justify-between border-t border-slate-200 px-3 py-2 text-[12px] text-slate-500 dark:border-slate-800">
+            <span>{currentPage * PAGE_SIZE + 1}–{Math.min(rows.length, currentPage * PAGE_SIZE + PAGE_SIZE)} of {rows.length}</span>
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={currentPage === 0} className="rounded-md border border-slate-200 px-2.5 py-1 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-800 dark:hover:bg-slate-800">Previous</button>
+              <span>Page {currentPage + 1} of {pageCount}</span>
+              <button type="button" onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))} disabled={currentPage >= pageCount - 1} className="rounded-md border border-slate-200 px-2.5 py-1 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-800 dark:hover:bg-slate-800">Next</button>
+            </div>
           </div>
         )}
       </Panel>
