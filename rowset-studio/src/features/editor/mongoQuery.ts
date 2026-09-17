@@ -287,10 +287,120 @@ export function mongoAggregateRequest(source: string, database: string): string 
   return `{${normalized.trim().slice(1, -1)},"database":${JSON.stringify(database)}}`;
 }
 
+const UPDATE_SHELL_QUERY = /^\s*db\s*\.\s*([A-Za-z0-9_$]+)\s*\.\s*updateOne\s*\(/;
+
+export function isMongoUpdateShellQuery(source: string): boolean {
+  return UPDATE_SHELL_QUERY.test(source);
+}
+
+// True for updateOne() shell syntax and for the raw {collection,filter,update,...}
+// request object: an "update" field is what tells it apart from a find().
+export function isMongoUpdateQuery(source: string): boolean {
+  if (isMongoUpdateShellQuery(source)) return true;
+  try {
+    const parsed: unknown = JSON.parse(source);
+    return !!parsed && typeof parsed === "object" && !Array.isArray(parsed) && "update" in parsed;
+  } catch {
+    return false;
+  }
+}
+
+const DELETE_SHELL_QUERY = /^\s*db\s*\.\s*([A-Za-z0-9_$]+)\s*\.\s*deleteOne\s*\(/;
+
+export function isMongoDeleteShellQuery(source: string): boolean {
+  return DELETE_SHELL_QUERY.test(source);
+}
+
+// True for deleteOne() shell syntax and for the raw request object. Unlike
+// find()/updateOne(), a delete has {collection,filter} only — the same
+// shape as a bare find({...}) — so the raw form needs an explicit
+// "delete":true marker to tell the two apart; the marker itself is never
+// sent to the backend (see mongoDeleteRequest).
+export function isMongoDeleteQuery(source: string): boolean {
+  if (isMongoDeleteShellQuery(source)) return true;
+  try {
+    const parsed: unknown = JSON.parse(source);
+    return !!parsed && typeof parsed === "object" && !Array.isArray(parsed) && (parsed as Record<string, unknown>).delete === true;
+  } catch {
+    return false;
+  }
+}
+
+export function mongoUpdateQuery(collection = "") {
+  return `db.${collection || "collection"}.updateOne({}, {"$set": {}})`;
+}
+
+export function mongoDeleteQuery(collection = "") {
+  return `db.${collection || "collection"}.deleteOne({})`;
+}
+
+function mongoUpdateShellToRequest(source: string): string {
+  const match = UPDATE_SHELL_QUERY.exec(source);
+  if (!match) throw new Error("Query must start with db.<collection>.updateOne(filter, update)");
+  const collection = match[1];
+  const openIdx = match[0].length - 1;
+  const { args, endIdx } = extractCall(source, openIdx);
+  const rest = source.slice(endIdx).trim().replace(/;$/, "").trim();
+  if (rest) throw new Error(`Unsupported query syntax: ${rest}`);
+  const [filterRaw, updateRaw] = splitTopLevelArgs(args);
+  const filter = (filterRaw ?? "").trim() || "{}";
+  const update = (updateRaw ?? "").trim();
+  if (!update) throw new Error("updateOne(filter, update) needs an update document.");
+  return `{"collection":${JSON.stringify(collection)},"filter":${filter},"update":${update}}`;
+}
+
+// Validate without reserializing, so large BSON numbers keep their exact
+// digits. Accepts updateOne() shell syntax or the raw request object.
+// `backup` always comes from the toolbar's own Row backups setting, not
+// from the source text, the same way `database` is always the toolbar's.
+export function mongoUpdateRequest(source: string, database: string, backup: boolean): string {
+  const normalized = isMongoUpdateShellQuery(source) ? mongoUpdateShellToRequest(source) : source;
+  const fields = splitTopLevelObject(normalized);
+  for (const key of Object.keys(fields)) if (!["collection", "filter", "update", "backup", "database"].includes(key)) throw new Error(`Unsupported query field: ${key}`);
+  const collection = fields.collection ? JSON.parse(fields.collection) : undefined;
+  if (typeof collection !== "string" || !collection.trim()) throw new Error("Choose a collection in the query, or open one from the explorer.");
+  const filter = fields.filter?.trim() || "{}";
+  if (!filter.startsWith("{")) throw new Error("filter must be a JSON object.");
+  const update = fields.update?.trim();
+  if (!update || !update.startsWith("{")) throw new Error('update must be a JSON object, e.g. {"$set": {...}}.');
+  if (fields.database != null && JSON.parse(fields.database) !== database) throw new Error("The query database differs from the toolbar. Remove database from the query or select that database.");
+  return `{"collection":${JSON.stringify(collection)},"filter":${filter},"update":${update},"backup":${backup ? "true" : "false"},"database":${JSON.stringify(database)}}`;
+}
+
+function mongoDeleteShellToRequest(source: string): string {
+  const match = DELETE_SHELL_QUERY.exec(source);
+  if (!match) throw new Error("Query must start with db.<collection>.deleteOne(filter)");
+  const collection = match[1];
+  const openIdx = match[0].length - 1;
+  const { args, endIdx } = extractCall(source, openIdx);
+  const rest = source.slice(endIdx).trim().replace(/;$/, "").trim();
+  if (rest) throw new Error(`Unsupported query syntax: ${rest}`);
+  const filter = args.trim() || "{}";
+  return `{"collection":${JSON.stringify(collection)},"filter":${filter},"delete":true}`;
+}
+
+// Validate without reserializing. Accepts deleteOne() shell syntax or the
+// raw request object; the "delete":true marker (see isMongoDeleteQuery) is
+// dropped here rather than forwarded, since the backend's DELETE endpoint
+// doesn't take it and rejects unknown fields.
+export function mongoDeleteRequest(source: string, database: string, backup: boolean): string {
+  const normalized = isMongoDeleteShellQuery(source) ? mongoDeleteShellToRequest(source) : source;
+  const fields = splitTopLevelObject(normalized);
+  for (const key of Object.keys(fields)) if (!["collection", "filter", "delete", "backup", "database"].includes(key)) throw new Error(`Unsupported query field: ${key}`);
+  const collection = fields.collection ? JSON.parse(fields.collection) : undefined;
+  if (typeof collection !== "string" || !collection.trim()) throw new Error("Choose a collection in the query, or open one from the explorer.");
+  const filter = fields.filter?.trim() || "{}";
+  if (!filter.startsWith("{")) throw new Error("filter must be a JSON object.");
+  if (fields.database != null && JSON.parse(fields.database) !== database) throw new Error("The query database differs from the toolbar. Remove database from the query or select that database.");
+  return `{"collection":${JSON.stringify(collection)},"filter":${filter},"backup":${backup ? "true" : "false"},"database":${JSON.stringify(database)}}`;
+}
+
 // Format punctuation and whitespace without parsing numbers into JS doubles.
 export function formatMongoQuery(source: string): string {
   if (isMongoShellQuery(source)) { JSON.parse(mongoShellToRequest(source)); return source.trim(); }
   if (isMongoAggregateShellQuery(source)) { JSON.parse(mongoAggregateShellToRequest(source)); return source.trim(); }
+  if (isMongoUpdateShellQuery(source)) { JSON.parse(mongoUpdateShellToRequest(source)); return source.trim(); }
+  if (isMongoDeleteShellQuery(source)) { JSON.parse(mongoDeleteShellToRequest(source)); return source.trim(); }
   JSON.parse(source); // Validate syntax only.
   const tokens = source.match(/"(?:[^"\\]|\\.)*"|[^\s]/g) ?? [];
   let depth = 0, result = "";

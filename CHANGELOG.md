@@ -5,6 +5,22 @@ and `scripts/package-macos.sh` stamp it into Studio (sidebar), the `rowset`
 executable and the macOS app. Every change set bumps the patch version and adds
 an entry here.
 
+## 0.0.94 — 2026-09-17
+
+- Added: the MongoDB editor's Run button now executes `updateOne()`/
+  `deleteOne()` typed directly into it, in shell syntax
+  (`db.col.updateOne(filter, update)` / `db.col.deleteOne(filter)`) or the
+  raw request JSON (`{"collection","filter","update"}`, or `{"collection",
+  "filter","delete":true}`) — the same two forms `find()`/`aggregate()`
+  already accepted. Previously only the Write dialog could run these;
+  typing one into the editor and hitting Run failed with "Unsupported
+  query field". Row backups, the WHERE guardrail and manual-commit
+  transactions all apply exactly as they do from the Write dialog.
+- Docs: updated README — CockroachDB gets actual (not just estimated) plans
+  since it has `ExplainAnalyze`, noted MongoDB's row backups (the only NoSQL
+  engine with them so far), and fixed the client-audit link's stale
+  "14-engine" count after Snowflake's removal.
+
 ## 0.0.93 — 2026-09-17
 
 - Fixed: reopening a MongoDB `find()` from Activity/History failed with

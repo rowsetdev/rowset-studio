@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mongoQuery, mongoRequest, formatMongoQuery, mongoShellToRequest, isMongoShellQuery, mongoShellToParts, mongoPartsToShell, mongoRequestToParts, mongoSourceToParts, isMongoAggregateQuery, mongoAggregateRequest, mongoAggregateRequestToParts, mongoAggregateSourceToParts } from './mongoQuery.ts';
+import { mongoQuery, mongoRequest, formatMongoQuery, mongoShellToRequest, isMongoShellQuery, mongoShellToParts, mongoPartsToShell, mongoRequestToParts, mongoSourceToParts, isMongoAggregateQuery, mongoAggregateRequest, mongoAggregateRequestToParts, mongoAggregateSourceToParts, isMongoUpdateQuery, mongoUpdateRequest, isMongoDeleteQuery, mongoDeleteRequest } from './mongoQuery.ts';
 test('MongoDB request and formatting preserve raw integers and decimals', () => {
   const source = '{"collection":"items","filter":{"count":9007199254740993,"n":1.12345678901234567890,"text":"a, {b}: c"},"sort":{},"limit":100}';
   assert(mongoRequest(source,'test').includes('9007199254740993'));
@@ -65,4 +65,27 @@ test('aggregate() reopens from its raw request JSON the same way find() does', (
   assert.equal(parts.collection, 'orders');
   assert.deepEqual(mongoAggregateSourceToParts(saved), parts);
   assert.throws(() => mongoAggregateRequest('{"collection":"items","pipeline":[],"unknownField":1}', 'test'));
+});
+test('updateOne() shell syntax and the raw request object both run from the editor, backup coming from the toolbar not the source', () => {
+  assert.equal(isMongoUpdateQuery('db.customers.updateOne({"id":1}, {"$set":{"x":1}})'), true);
+  assert.equal(isMongoUpdateQuery('{"collection":"customers","filter":{},"update":{"$set":{"x":1}}}'), true);
+  assert.equal(isMongoUpdateQuery('{"collection":"customers","filter":{}}'), false);
+  assert.equal(isMongoUpdateQuery('db.customers.find({})'), false);
+  const fromShell = JSON.parse(mongoUpdateRequest('db.customers.updateOne({"id":1}, {"$set":{"x":1}})', 'test', true));
+  assert.deepEqual(fromShell, { collection: 'customers', filter: { id: 1 }, update: { $set: { x: 1 } }, backup: true, database: 'test' });
+  const fromRaw = JSON.parse(mongoUpdateRequest('{"collection":"customers","filter":{"id":1},"update":{"$set":{"x":1}},"backup":false}', 'test', true));
+  assert.equal(fromRaw.backup, true, 'the toolbar backup flag overrides whatever the saved request said');
+  assert.throws(() => mongoUpdateRequest('{"collection":"customers","filter":{}}', 'test', false), /update/);
+  assert.throws(() => mongoUpdateRequest('{"collection":"customers","filter":{},"update":{},"unknownField":1}', 'test', false));
+});
+test('deleteOne() shell syntax and the raw request object (marked "delete":true) both run from the editor', () => {
+  assert.equal(isMongoDeleteQuery('db.customers.deleteOne({"id":1})'), true);
+  assert.equal(isMongoDeleteQuery('{"collection":"customers","filter":{"id":1},"delete":true}'), true);
+  assert.equal(isMongoDeleteQuery('{"collection":"customers","filter":{"id":1}}'), false, 'a bare filter is ambiguous with find() and must not be treated as a delete');
+  assert.equal(isMongoDeleteQuery('db.customers.find({})'), false);
+  const fromShell = JSON.parse(mongoDeleteRequest('db.customers.deleteOne({"id":1})', 'test', true));
+  assert.deepEqual(fromShell, { collection: 'customers', filter: { id: 1 }, backup: true, database: 'test' });
+  const fromRaw = JSON.parse(mongoDeleteRequest('{"collection":"customers","filter":{"id":1},"delete":true}', 'test', false));
+  assert.deepEqual(fromRaw, { collection: 'customers', filter: { id: 1 }, backup: false, database: 'test' });
+  assert.throws(() => mongoDeleteRequest('{"collection":"customers","filter":{"id":1},"delete":true,"unknownField":1}', 'test', false));
 });

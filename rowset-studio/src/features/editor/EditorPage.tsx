@@ -15,13 +15,13 @@ import RunToolbar, { type WorkspaceStatus } from "./RunToolbar";
 import SaveToNotebookDialog from "../notebooks/SaveToNotebookDialog";
 import PlanPanel, { type PlanState } from "../plan/PlanPanel";
 import ExplorerPanel from "./ExplorerPanel";
-import { explainQuery, exportTable, getSchema, listDatabases, runOnConnections, runQuery, beginTxn, txnQuery, commitTxn, rollbackTxn, mongoBeginTxn, mongoCommitTxn, mongoRollbackTxn, type QueryResult, type SchemaInfo } from "./api";
+import { explainQuery, exportTable, getSchema, listDatabases, runOnConnections, runQuery, beginTxn, txnQuery, commitTxn, rollbackTxn, mongoBeginTxn, mongoCommitTxn, mongoRollbackTxn, mongoUpdate, mongoDelete, mongoTxnUpdate, mongoTxnDelete, type QueryResult, type SchemaInfo } from "./api";
 import { buildSqlCompletions } from "./sqlCompletions";
 import { useSchema } from "./useEditor";
 import { formatSql, statementAt, splitStatements } from "./sqlText";
 import { useAuth } from "../../lib/auth";
 import { SchemaActions } from "./schemaActions";
-import { mongoQuery, mongoRequest, formatMongoQuery, isMongoAggregateQuery, mongoAggregateRequest } from "./mongoQuery";
+import { mongoQuery, mongoRequest, formatMongoQuery, isMongoAggregateQuery, mongoAggregateRequest, isMongoUpdateQuery, mongoUpdateRequest, isMongoDeleteQuery, mongoDeleteRequest } from "./mongoQuery";
 import MongoQueryBar from "./MongoQueryBar";
 import RedisQueryBar, { redisQuery } from "./RedisQueryBar";
 import ElasticsearchQueryBar, { elasticsearchQuery } from "./ElasticsearchQueryBar";
@@ -520,8 +520,29 @@ function EditorWorkspace({ snapshot, initial }: { snapshot: WorkspaceSnapshot; i
     };
     // A restore script puts rows back; backing it up again would only add noise.
     const backup = !skipBackup && !shared && !activeTab?.restoreOf && rowBackupEnabled();
+    const mongoBackupNotice = (result: { backup?: { id: string; rows: number }; backupSkipped?: string }): string | undefined => {
+      if (result.backup) return `Backed up ${result.backup.rows} document(s); restore from Activity → Row backups.`;
+      if (result.backupSkipped) return `No backup was taken: ${result.backupSkipped}.`;
+      return undefined;
+    };
     const runMongo = async (): Promise<QueryResult> => {
       const aggregate = isMongoAggregateQuery(sql);
+      if (!aggregate && isMongoUpdateQuery(sql)) {
+        const request = JSON.parse(mongoUpdateRequest(sql, selectedDb, backup)) as { collection: string; filter: unknown; update: unknown; backup: boolean; database: string };
+        const txnId = transactionIDs[tabId];
+        const response = txnId
+          ? await mongoTxnUpdate(connectionId, txnId, { collection: request.collection, filter: request.filter, update: request.update, backup: request.backup })
+          : await mongoUpdate(connectionId, request);
+        return { columns: ["matchedCount", "modifiedCount"], rows: [[response.matchedCount, response.modifiedCount]], rowCount: 1, durationMs: response.durationMs, policyNotice: mongoBackupNotice(response) };
+      }
+      if (!aggregate && isMongoDeleteQuery(sql)) {
+        const request = JSON.parse(mongoDeleteRequest(sql, selectedDb, backup)) as { collection: string; filter: unknown; backup: boolean; database: string };
+        const txnId = transactionIDs[tabId];
+        const response = txnId
+          ? await mongoTxnDelete(connectionId, txnId, { collection: request.collection, filter: request.filter, backup: request.backup })
+          : await mongoDelete(connectionId, request);
+        return { columns: ["deletedCount"], rows: [[response.deletedCount]], rowCount: 1, durationMs: response.durationMs, policyNotice: mongoBackupNotice(response) };
+      }
       const path = aggregate ? "aggregate" : "find";
       const body = aggregate ? mongoAggregateRequest(sql, selectedDb) : mongoRequest(sql, selectedDb);
       const response = await api<{ documents: unknown[]; truncated: boolean; durationMs: number; limit: number }>(`/connections/${connectionId}/documents/${path}`, { method: "POST", signal: controller.signal, body });

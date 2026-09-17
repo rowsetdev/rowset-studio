@@ -38,11 +38,11 @@ encrypted in a local SQLite database.
 | <img src="rowset-studio/src/assets/engines/mysql.png" height="18" valign="middle"> MySQL | Host/port or URL, SSH tunnel | Full SQL editor, DDL, CSV import, row editing, schema compare |
 | <img src="rowset-studio/src/assets/engines/mariadb.png" height="18" valign="middle"> MariaDB | Host/port or URL, SSH tunnel | Full SQL editor, DDL, CSV import, row editing, schema compare |
 | <img src="rowset-studio/src/assets/engines/mssql.svg" height="18" valign="middle"> SQL Server | Host/port or URL, SSH tunnel | SQL editor, DDL, CSV import, row editing, schema compare, estimated and actual plans |
-| <img src="rowset-studio/src/assets/engines/cockroachdb.svg" height="18" valign="middle"> CockroachDB | Host/port (PostgreSQL wire protocol) | SQL editor, transactions, DDL, CSV import/export, row editing, estimated plans |
+| <img src="rowset-studio/src/assets/engines/cockroachdb.svg" height="18" valign="middle"> CockroachDB | Host/port (PostgreSQL wire protocol) | SQL editor, transactions, DDL, CSV import/export, row editing, estimated and actual plans |
 | SQLite | Absolute path to an existing file | SQL, transactions, schema, keys, indexes, DDL, CSV import/export, JSON export |
 | DuckDB | Absolute path to an existing file; CGO build | SQL, transactions, tables/views, DDL, CSV import/export, JSON export |
 | <img src="rowset-studio/src/assets/engines/clickhouse.svg" height="18" valign="middle"> ClickHouse | Native TCP: 9440 with TLS, 9000 without | SQL, databases, tables/views, DDL, CSV/JSON export, estimated plans |
-| <img src="rowset-studio/src/assets/engines/mongodb.svg" height="18" valign="middle"> MongoDB | Host/port; `authSource=admin` | Compass-style filter/project/sort/skip/limit query bar synced with `db.collection.find()`, `db.collection.aggregate([...])` read-only pipelines, document insert/update/delete, manual-commit transactions (replica set or mongos required) |
+| <img src="rowset-studio/src/assets/engines/mongodb.svg" height="18" valign="middle"> MongoDB | Host/port; `authSource=admin` | Compass-style filter/project/sort/skip/limit query bar synced with `db.collection.find()`, `db.collection.aggregate([...])` read-only pipelines, document insert/update/delete with row backups, manual-commit transactions (replica set or mongos required) |
 | <img src="rowset-studio/src/assets/engines/redis.svg" height="18" valign="middle"> Redis | Host/port | Pattern/type scan bar, keys grouped by type as pseudo-tables, string/hash key writes and delete |
 | Valkey | Host/port | Redis-compatible pattern/type scan bar, key previews, string/hash key writes and delete |
 | <img src="rowset-studio/src/assets/engines/cassandra.svg" height="18" valign="middle"> Cassandra | Contact points, keyspace, TLS/SSH, consistency/paging | Governed CQL reads/writes/DDL/batches, schema/DDL, CSV import, CSV/JSON export, CQL `INSERT JSON` export for base tables without counters |
@@ -75,8 +75,8 @@ below for exact limits.
   statements per connection.
 - **Execution plans** — Explain draws the plan of a statement as a diagram
   with cost heat and warnings; actual rows and timings on request for
-  PostgreSQL, MySQL, MariaDB and SQL Server. CockroachDB and ClickHouse get a
-  text plan (no actual-rows mode yet).
+  PostgreSQL, MySQL, MariaDB, SQL Server and CockroachDB. ClickHouse gets a
+  text plan only (no actual-rows mode).
 - **Edit rows** — change cells of a one-table result, review the generated
   UPDATE statements and apply them like any query.
 - **CSV import** — import a CSV file into a table in one transaction, with a
@@ -87,8 +87,10 @@ below for exact limits.
   automatically. Export as Markdown or as a SQL script. **Save** in the
   editor adds the current query to a notebook; a cell opens in a new editor
   tab.
-- **Row backups** — optionally save the rows an UPDATE or DELETE changes;
-  Activity → Row backups opens a script that puts them back.
+- **Row backups** — optionally save the rows/documents an UPDATE or DELETE
+  changes, for SQL engines and MongoDB (up to 10,000 per statement);
+  Activity → Row backups restores them in one click or opens the restore
+  statements/script in a new tab to review or edit first.
 - **Schedules** — run a SELECT at set times in your time zone and save each
   result as a CSV or JSON file, while Rowset Studio is running.
 - **Activity** — your statements across every connection, plus
@@ -120,9 +122,11 @@ MongoDB, Redis, Valkey and Elasticsearch support single-document/key
 insert, update and delete from the query toolbar's **Write** action, behind
 the same policy, read-only and audit rules as SQL writes. MongoDB also runs
 read-only `aggregate()` pipelines, with `$out`, `$merge`, `$lookup` and
-other writing/cross-collection/JavaScript stages rejected, and manual-commit
-transactions (see above; MongoDB-only, requires a replica set or mongos).
-Bulk APIs and SSH tunnels are not yet supported for any of the four, and
+other writing/cross-collection/JavaScript stages rejected, manual-commit
+transactions (see above; MongoDB-only, requires a replica set or mongos),
+and row backups before update/delete (see Row backups above; the only
+NoSQL engine so far — Redis, Cassandra and Elasticsearch don't have this
+yet). Bulk APIs and SSH tunnels are not yet supported for any of the four, and
 index/primary-key/foreign-key metadata is not loaded for any
 non-`database/sql` engine (SQLite, DuckDB, ClickHouse and these four).
 Inline grid editing remains available only for the SQL engines, since it's
@@ -277,8 +281,9 @@ node --experimental-strip-types rowset-studio/scripts/bench-grid.mjs
 Live engine tests run against real database servers and are skipped unless
 their credentials are set:
 
-The [14-engine client audit](reports/database-client-audit-2026-09-17.md) records
-which operations were verified live and which remain unverified. To repeat its
+The [client audit](reports/database-client-audit-2026-09-17.md) (predates the
+Snowflake removal below) records which operations were verified live and
+which remain unverified. To repeat its
 container and file-engine probes one engine at a time, run
 `python3 scripts/audit/run.py all` from the repository root. Image digests are
 locked in `scripts/audit/images.lock.json`; JSON evidence is written under
