@@ -37,21 +37,12 @@ func (s *Server) elasticsearchSearch(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "BAD_REQUEST", "size must be between 1 and 10000")
 		return
 	}
-	quote := func(v string) string { return `"` + strings.ReplaceAll(v, `"`, `""`) + `"` }
 	database := connection.Database
 	if database == "" {
 		database = "elasticsearch"
 	}
-	statement := "SELECT * FROM " + quote(database) + "." + quote(input.Index)
 	hasQuery := len(input.Query) > 0 && strings.TrimSpace(string(input.Query)) != "{}" || len(input.SearchAfter) > 0 || len(input.Aggs) > 0
-	if hasQuery {
-		statement += ` WHERE "__rowset_search_query__" IS NOT NULL`
-	}
-	info, err := sqlguard.ParseDialect(sqlguard.DialectPostgres, statement)
-	if err != nil {
-		writeError(w, 400, "BAD_REQUEST", err.Error())
-		return
-	}
+	info := nosqlStatement(sqlguard.Select, database, input.Index, hasQuery)
 	disabled, enabled, limit, timeout, err := s.resolvePolicies(r, identity, connection)
 	if err != nil {
 		writeError(w, 500, "INTERNAL", "policies unavailable")
@@ -114,10 +105,10 @@ func (s *Server) elasticsearchIndex(w http.ResponseWriter, r *http.Request) {
 	if database == "" {
 		database = "elasticsearch"
 	}
-	quote := func(v string) string { return `"` + strings.ReplaceAll(v, `"`, `""`) + `"` }
-	statement := "UPDATE " + quote(database) + "." + quote(input.Index) + ` SET "document" = 'rowset' WHERE "__rowset_document_id__" IS NOT NULL`
+	// Always targets exactly one document by id, index or replace.
+	info := nosqlStatement(sqlguard.Update, database, input.Index, true)
 	raw, _ := json.Marshal(input)
-	target, ctx, cancel, run := s.nosqlWriteGuard(w, r, connection, database, statement, string(raw))
+	target, ctx, cancel, run := s.nosqlWriteGuard(w, r, connection, database, info, string(raw))
 	if !run {
 		return
 	}
@@ -157,10 +148,10 @@ func (s *Server) elasticsearchUpdate(w http.ResponseWriter, r *http.Request) {
 	if database == "" {
 		database = "elasticsearch"
 	}
-	quote := func(v string) string { return `"` + strings.ReplaceAll(v, `"`, `""`) + `"` }
-	statement := "UPDATE " + quote(database) + "." + quote(input.Index) + ` SET "document" = 'rowset' WHERE "__rowset_document_id__" IS NOT NULL`
+	// Always targets exactly one document by id.
+	info := nosqlStatement(sqlguard.Update, database, input.Index, true)
 	raw, _ := json.Marshal(input)
-	target, ctx, cancel, run := s.nosqlWriteGuard(w, r, connection, database, statement, string(raw))
+	target, ctx, cancel, run := s.nosqlWriteGuard(w, r, connection, database, info, string(raw))
 	if !run {
 		return
 	}
@@ -200,10 +191,10 @@ func (s *Server) elasticsearchDelete(w http.ResponseWriter, r *http.Request) {
 	if database == "" {
 		database = "elasticsearch"
 	}
-	quote := func(v string) string { return `"` + strings.ReplaceAll(v, `"`, `""`) + `"` }
-	statement := "DELETE FROM " + quote(database) + "." + quote(input.Index) + ` WHERE "__rowset_document_id__" IS NOT NULL`
+	// Always targets exactly one document by id.
+	info := nosqlStatement(sqlguard.Delete, database, input.Index, true)
 	raw, _ := json.Marshal(input)
-	target, ctx, cancel, run := s.nosqlWriteGuard(w, r, connection, database, statement, string(raw))
+	target, ctx, cancel, run := s.nosqlWriteGuard(w, r, connection, database, info, string(raw))
 	if !run {
 		return
 	}

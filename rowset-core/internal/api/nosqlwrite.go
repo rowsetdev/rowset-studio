@@ -11,23 +11,31 @@ import (
 	sqlguard "github.com/dbaopsio/rowset-studio/rowset-parser"
 )
 
-// nosqlWriteGuard evaluates a synthetic INSERT/UPDATE/DELETE statement
+// nosqlStatement builds the sqlguard.Info a MongoDB/Redis/Elasticsearch
+// operation is classified by, directly as Go values rather than assembling
+// SQL text and reparsing it. That round trip (build a fake "UPDATE ... WHERE
+// ..." string, then parse it back) is exactly what let a hardcoded WHERE
+// placeholder silently defeat the without-WHERE guardrail: a struct literal
+// can't "forget" to interpolate a clause the way string concatenation can.
+// object is the collection/key/index name, addressed as one table so
+// per-table custom policies (deny_table, deny_schema) still match it.
+func nosqlStatement(kind sqlguard.Kind, database, object string, hasWhere bool) sqlguard.Info {
+	return sqlguard.Info{Kind: kind, Tables: []sqlguard.TableRef{{Schema: database, Name: object}}, HasWhere: hasWhere}
+}
+
+// nosqlWriteGuard evaluates a synthetic INSERT/UPDATE/DELETE classification
 // against the same governance rules real SQL writes go through (read-only
 // role/connection, disabled/enabled policy names, custom policies) before a
-// MongoDB, Redis/Valkey or Elasticsearch write runs. statementSQL is never
-// executed; it only classifies the operation for the policy engine, the way
-// the read-side document/key guardrails already do. It writes the HTTP
-// response itself and returns ok=false when the write must not proceed.
-func (s *Server) nosqlWriteGuard(w http.ResponseWriter, r *http.Request, connection domain.Connection, database, statementSQL, rawBody string) (target engine.Connection, ctx context.Context, cancel context.CancelFunc, ok bool) {
+// MongoDB, Redis/Valkey or Elasticsearch write runs. info is never turned
+// back into SQL or executed; it only classifies the operation for the policy
+// engine, the way the read-side document/key guardrails already do. It
+// writes the HTTP response itself and returns ok=false when the write must
+// not proceed.
+func (s *Server) nosqlWriteGuard(w http.ResponseWriter, r *http.Request, connection domain.Connection, database string, info sqlguard.Info, rawBody string) (target engine.Connection, ctx context.Context, cancel context.CancelFunc, ok bool) {
 	identity := identityFromContext(r.Context())
 	role, err := s.store.UserRole(r.Context(), identity.UserID)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "role missing")
-		return engine.Connection{}, nil, nil, false
-	}
-	info, err := sqlguard.ParseDialect(sqlguard.DialectPostgres, statementSQL)
-	if err != nil {
-		writeError(w, 400, "BAD_REQUEST", err.Error())
 		return engine.Connection{}, nil, nil, false
 	}
 	disabled, enabled, _, timeout, err := s.resolvePolicies(r, identity, connection)

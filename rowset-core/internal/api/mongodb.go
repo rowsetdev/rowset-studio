@@ -44,22 +44,13 @@ func (s *Server) mongoFind(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "BAD_REQUEST", err.Error())
 		return
 	}
-	// Represent the read for existing table/schema and SELECT policies. The
-	// synthetic SQL is never sent to a database; only the validated find runs.
 	database := input.Database
 	if database == "" {
 		database = connection.Database
 	}
-	quote := func(v string) string { return `"` + strings.ReplaceAll(v, `"`, `""`) + `"` }
-	statement := "SELECT * FROM " + quote(database) + "." + quote(input.Collection)
-	if mongoFilterHasPredicate(filter) {
-		statement += ` WHERE "__rowset_document_filter__" IS NOT NULL`
-	}
-	info, err := sqlguard.ParseDialect(sqlguard.DialectPostgres, statement)
-	if err != nil {
-		writeError(w, 400, "BAD_REQUEST", err.Error())
-		return
-	}
+	// Represents the read for existing table/schema and SELECT policies; it
+	// is never turned into SQL text or sent to a database.
+	info := nosqlStatement(sqlguard.Select, database, input.Collection, mongoFilterHasPredicate(filter))
 	disabled, enabled, limit, timeout, err := s.resolvePolicies(r, identity, connection)
 	if err != nil {
 		writeError(w, 500, "INTERNAL", "policies unavailable")
@@ -133,13 +124,9 @@ func (s *Server) mongoAggregate(w http.ResponseWriter, r *http.Request) {
 	if database == "" {
 		database = connection.Database
 	}
-	quote := func(v string) string { return `"` + strings.ReplaceAll(v, `"`, `""`) + `"` }
-	statement := "SELECT * FROM " + quote(database) + "." + quote(input.Collection) + ` WHERE "__rowset_aggregation_pipeline__" IS NOT NULL`
-	info, err := sqlguard.ParseDialect(sqlguard.DialectPostgres, statement)
-	if err != nil {
-		writeError(w, 400, "BAD_REQUEST", err.Error())
-		return
-	}
+	// A pipeline is always treated as scoped (HasWhere: true): its stages
+	// are already explicit about what they operate on, unlike a bare find({}).
+	info := nosqlStatement(sqlguard.Select, database, input.Collection, true)
 	disabled, enabled, limit, timeout, err := s.resolvePolicies(r, identity, connection)
 	if err != nil {
 		writeError(w, 500, "INTERNAL", "policies unavailable")
@@ -202,10 +189,9 @@ func (s *Server) mongoInsert(w http.ResponseWriter, r *http.Request) {
 	if database == "" {
 		database = connection.Database
 	}
-	quote := func(v string) string { return `"` + strings.ReplaceAll(v, `"`, `""`) + `"` }
-	statement := "INSERT INTO " + quote(database) + "." + quote(input.Collection) + ` ("document") VALUES ('rowset')`
+	info := nosqlStatement(sqlguard.Insert, database, input.Collection, false)
 	raw, _ := json.Marshal(input)
-	target, ctx, cancel, run := s.nosqlWriteGuard(w, r, connection, database, statement, string(raw))
+	target, ctx, cancel, run := s.nosqlWriteGuard(w, r, connection, database, info, string(raw))
 	if !run {
 		return
 	}
@@ -250,16 +236,12 @@ func (s *Server) mongoUpdate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "BAD_REQUEST", err.Error())
 		return
 	}
-	quote := func(v string) string { return `"` + strings.ReplaceAll(v, `"`, `""`) + `"` }
-	// Deliberately omitted, not a placeholder, when the filter has no
-	// predicate: an UPDATE with no WHERE is exactly what the "no
-	// UPDATE/DELETE without WHERE" guardrail exists to catch.
-	statement := "UPDATE " + quote(database) + "." + quote(input.Collection) + ` SET "document" = 'rowset'`
-	if mongoFilterHasPredicate(filter) {
-		statement += ` WHERE "__rowset_document_filter__" IS NOT NULL`
-	}
+	// hasWhere reflects the real filter, not a placeholder: an UPDATE with
+	// no predicate is exactly what the "no UPDATE/DELETE without WHERE"
+	// guardrail exists to catch.
+	info := nosqlStatement(sqlguard.Update, database, input.Collection, mongoFilterHasPredicate(filter))
 	raw, _ := json.Marshal(input)
-	target, ctx, cancel, run := s.nosqlWriteGuard(w, r, connection, database, statement, string(raw))
+	target, ctx, cancel, run := s.nosqlWriteGuard(w, r, connection, database, info, string(raw))
 	if !run {
 		return
 	}
@@ -304,13 +286,9 @@ func (s *Server) mongoDelete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "BAD_REQUEST", err.Error())
 		return
 	}
-	quote := func(v string) string { return `"` + strings.ReplaceAll(v, `"`, `""`) + `"` }
-	statement := "DELETE FROM " + quote(database) + "." + quote(input.Collection)
-	if mongoFilterHasPredicate(filter) {
-		statement += ` WHERE "__rowset_document_filter__" IS NOT NULL`
-	}
+	info := nosqlStatement(sqlguard.Delete, database, input.Collection, mongoFilterHasPredicate(filter))
 	raw, _ := json.Marshal(input)
-	target, ctx, cancel, run := s.nosqlWriteGuard(w, r, connection, database, statement, string(raw))
+	target, ctx, cancel, run := s.nosqlWriteGuard(w, r, connection, database, info, string(raw))
 	if !run {
 		return
 	}
