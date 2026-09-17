@@ -50,6 +50,7 @@ export default function SchedulesPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const { data: connections = [] } = useConnections();
+  const schedulableConnections = connections.filter((connection) => !["mongodb", "redis", "valkey", "cassandra", "elasticsearch"].includes(connection.engine));
   const defaults = useQuery({ queryKey: ["schedule-defaults"], queryFn: scheduleDefaults });
   const list = useQuery({
     queryKey: ["schedules"],
@@ -123,7 +124,7 @@ export default function SchedulesPage() {
         title="Schedules"
         subtitle="Run a SELECT at set times and save each result as a file. Schedules run while Rowset Studio is running, even with the browser closed."
         actions={
-          <button type="button" disabled={!defaults.data} onClick={() => { setSelectedId(null); setDraft(emptyDraft(defaults.data?.outputDir ?? "", connections[0]?.id ?? "")); }} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-brand-600 px-3 text-[12px] font-medium text-white hover:bg-brand-500 disabled:opacity-50">
+          <button type="button" disabled={!defaults.data || schedulableConnections.length === 0} onClick={() => { setSelectedId(null); setDraft(emptyDraft(defaults.data?.outputDir ?? "", schedulableConnections[0]?.id ?? "")); }} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-brand-600 px-3 text-[12px] font-medium text-white hover:bg-brand-500 disabled:opacity-50">
             <Icon name="plus" size={13} />New schedule
           </button>
         }
@@ -158,7 +159,7 @@ export default function SchedulesPage() {
                   <Field label="Connection">
                     <Select value={draft.connectionId} onChange={(e) => patch({ connectionId: e.target.value })} required>
                       <option value="">Choose…</option>
-                      {connections.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                      {schedulableConnections.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                     </Select>
                   </Field>
                 </div>

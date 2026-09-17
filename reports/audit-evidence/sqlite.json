@@ -1,0 +1,14 @@
+{
+  "engine": "sqlite",
+  "status": "pass",
+  "image": null,
+  "mode": "disposable",
+  "tests": [
+    {
+      "test": "TestSQLiteFileQuerySchemaDDLAndRollback",
+      "result": "pass",
+      "elapsed": 0.01
+    }
+  ],
+  "exit_code": 0
+}

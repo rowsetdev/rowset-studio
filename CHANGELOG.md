@@ -5,6 +5,21 @@ and `scripts/package-macos.sh` stamp it into Studio (sidebar), the `rowset`
 executable and the macOS app. Every change set bumps the patch version and adds
 an entry here.
 
+## 0.0.87 — 2026-09-17
+
+- Added MongoDB document insert/update/delete and Elasticsearch document
+  index/update/delete, behind the same policy/read-only/audit guardrails as
+  SQL writes; update requires operator documents ($set/$unset/…), never a
+  full-document replace.
+- Added Redis/Valkey string and hash-field writes and key deletion, with
+  optional TTL.
+- Added a "Write" action in the query toolbar for MongoDB, Redis/Valkey and
+  Elasticsearch connections to drive these from Studio.
+- Added CockroachDB and ClickHouse EXPLAIN (text plan, no ANALYZE yet).
+- Added SQLite and DuckDB CSV import.
+- Schema Compare's connection pickers now hide MongoDB, Redis, Valkey and
+  Elasticsearch, which have no table/column metadata to diff.
+
 ## 0.0.86 — 2026-09-16
 
 - Expanded Cassandra from personal read-only queries to policy-governed CQL

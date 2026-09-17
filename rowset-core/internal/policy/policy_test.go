@@ -49,6 +49,17 @@ func TestUnclassifiedDenialIsOptIn(t *testing.T) {
 	}
 }
 
+func TestReadOnlyRejectsUnclassifiedStatements(t *testing.T) {
+	input := Input{Statement: statement(t, "WAITFOR DELAY '00:00:01'"), ReadOnly: true, Disabled: map[string]bool{}, Enabled: map[string]bool{}}
+	if got := Evaluate(input); got.Effect != Deny || got.PolicyID != "read_only_unclassified" {
+		t.Fatalf("read-only unclassified statement was not denied: %#v", got)
+	}
+	input.Cleared = true
+	if got := Evaluate(input); got.Effect != Allow {
+		t.Fatalf("cleared unclassified statement was not allowed: %#v", got)
+	}
+}
+
 func TestCassandraStatementsUseGuardrails(t *testing.T) {
 	for _, query := range []string{"UPDATE users SET name='x'", "BEGIN BATCH INSERT INTO users (id) VALUES (1); UPDATE users SET name='x'; APPLY BATCH;"} {
 		info, err := sqlguard.ParseCQL(query)

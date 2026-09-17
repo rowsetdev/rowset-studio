@@ -35,3 +35,8 @@ test("'#' is a comment only on MySQL and MariaDB", () => {
   assert.equal(splitStatements("SELECT 1 # x ; y").length, 1);
   assert.deepEqual([hashComments("mysql"), hashComments("mssql"), hashComments("postgres"), hashComments()], [true, false, false, true]);
 });
+
+test('Cassandra batch stays one statement through APPLY BATCH', () => {
+  const batch = "BEGIN UNLOGGED BATCH\nINSERT INTO items (id) VALUES (1);\nUPDATE items SET name = 'a;b' WHERE id = 2;\nAPPLY BATCH;";
+  assert.deepEqual(splitStatements(`${batch}\nSELECT * FROM items;`, 'cassandra').map((item) => item.sql), [batch, 'SELECT * FROM items;']);
+});

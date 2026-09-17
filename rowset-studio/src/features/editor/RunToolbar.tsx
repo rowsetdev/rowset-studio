@@ -5,6 +5,8 @@ import { Icon } from "../../components/Icon";
 import { useConnections } from "../connections/useConnections";
 import type { Connection } from "../connections/api";
 import { listDatabases } from "./api";
+import { useEngineCapabilities } from "../../lib/instance";
+import NoSqlWriteDialog from "./NoSqlWriteDialog";
 
 // Existing duplicate names are never renamed for the user, so lists that
 // pick a connection by name distinguish them with host/port/database.
@@ -112,11 +114,13 @@ export default function RunToolbar({
   });
 
   const current = connections?.find((c) => c.id === connectionId);
+  const capabilities = useEngineCapabilities(current?.engine);
+  const [writing, setWriting] = useState(false);
   const isMongo = current?.engine === "mongodb";
   // Single-JSON-object engines: run the whole buffer as one request, same as
   // Mongo, rather than splitting/running SQL statements.
   const isDocumentEngine = isMongo || current?.engine === "redis" || current?.engine === "valkey" || current?.engine === "elasticsearch";
-  const pendingEngine = ["redis", "valkey", "cassandra", "elasticsearch"].includes(current?.engine ?? "");
+  const fileExtension = isDocumentEngine ? "json" : current?.engine === "cassandra" ? "cql" : "sql";
   const dbOptions = databases.length ? databases : current ? [current.database] : [];
   const longestDatabaseName = Math.max(database.length, ...dbOptions.map((item) => item.length), 14);
   const databaseWidth = Math.min(560, Math.max(160, longestDatabaseName * 8.5 + 48));
@@ -180,7 +184,7 @@ export default function RunToolbar({
           disabled={!connectionId || transactionBusy || (autoRefreshMs === 0 && !autoRefreshEligible)}
           disabledReason="Auto-refresh only repeats statements that look read-only or a procedure call (SELECT/WITH/SHOW/EXPLAIN/EXEC…), so it never turns a query into a recurring write."
         />
-        {current?.engine !== "mongodb" && !pendingEngine && <CommitModeSwitch
+        {capabilities.transactions && <CommitModeSwitch
           manual={manualCommit}
           open={transactionOpen}
           aborted={transactionAborted}
@@ -193,7 +197,28 @@ export default function RunToolbar({
           <button onClick={() => onTransaction("rollback")} disabled={running || transactionBusy} className={secondaryButton} title="Discard the pending changes">Rollback</button>
         </>}
         <span className="h-5 w-px bg-slate-200 dark:bg-slate-800" />
-        {!isDocumentEngine && current?.engine !== "cassandra" && <ToolbarButton onClick={() => onExplain(false)} disabled={!connectionId || running || transactionBusy || ["sqlite", "duckdb", "clickhouse", "redis", "valkey", "cassandra", "elasticsearch"].includes(current?.engine ?? "")} icon="explain" label="Explain" />}
+        {capabilities.explain && <ToolbarButton onClick={() => onExplain(false)} disabled={!connectionId || running || transactionBusy} icon="explain" label="Explain" />}
+        {(capabilities.documentWrite || capabilities.keyWrite) && (
+          <button
+            type="button"
+            onClick={() => setWriting(true)}
+            disabled={!connectionId || running || transactionBusy || current?.readOnly}
+            title={current?.readOnly ? "This connection is read-only" : "Insert, update or delete a document/key"}
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 text-[12px] text-slate-600 transition hover:bg-slate-50 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+          >
+            <Icon name="pencil" size={14} />
+            Write
+          </button>
+        )}
+        {writing && current && (isMongo || current.engine === "redis" || current.engine === "valkey" || current.engine === "elasticsearch") && (
+          <NoSqlWriteDialog
+            connectionId={current.id}
+            engine={current.engine as "mongodb" | "redis" | "valkey" | "elasticsearch"}
+            database={database || current.database}
+            onClose={() => setWriting(false)}
+            onWritten={onRun}
+          />
+        )}
         <ToolbarButton onClick={onFormat} icon="format" label="Format" />
         {onAssistantToggle && (
           <button
@@ -215,10 +240,10 @@ export default function RunToolbar({
         <MoreMenu items={[
           { label: isDocumentEngine ? "Run query" : "Run all statements", hint: "⇧⌘↵ · stops at the first error", onSelect: onRunAll, disabled: !connectionId || running || transactionBusy },
           ...(onRunOnConnections ? [{ label: "Run on several connections…", hint: "Same SQL on each, results side by side", onSelect: onRunOnConnections, disabled: running || transactionBusy }] : []),
-          ...(isDocumentEngine || current?.engine === "cassandra" ? [] : [{ label: "Explain with actual rows", hint: "Runs the SELECT to measure it", onSelect: () => onExplain(true), disabled: !connectionId || running || transactionBusy || ["sqlite", "duckdb", "clickhouse", "redis", "valkey", "cassandra", "elasticsearch"].includes(current?.engine ?? "") }]),
+          ...(capabilities.explainAnalyze ? [{ label: "Explain with actual rows", hint: "Runs the SELECT to measure it", onSelect: () => onExplain(true), disabled: !connectionId || running || transactionBusy } ] : []),
           ...(onSchedule ? [{ label: "Schedule this query…", hint: "Save its result to a file on a schedule", onSelect: onSchedule, disabled: !connectionId }] : []),
-          { label: isDocumentEngine ? "Open .json file…" : "Open .sql file…", onSelect: onOpenFile },
-          { label: isDocumentEngine ? "Download as .json" : "Download as .sql", onSelect: onSaveFile },
+          { label: `Open .${fileExtension} file…`, onSelect: onOpenFile },
+          { label: `Download as .${fileExtension}`, onSelect: onSaveFile },
           { label: "Export workspace (JSON)", onSelect: onExportWorkspace, hint: "All open tabs, not encrypted" },
           { label: "Import workspace…", onSelect: onImportWorkspace, hint: "Adds tabs; never replaces" },
         ]} />

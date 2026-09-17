@@ -133,6 +133,9 @@ func (s *Server) executeScheduled(ctx context.Context, item store.ScheduledQuery
 	if err != nil {
 		return 0, "", errors.New("the connection no longer exists")
 	}
+	if !engine.SupportsScheduledSQL(connection.Engine) {
+		return 0, "", errors.New("scheduled queries are not available for this engine")
+	}
 	identity := domain.Identity{UserID: user.ID, OrgID: user.OrgID, Email: user.Email, Role: role.Name}
 	r, err := http.NewRequestWithContext(ctx, http.MethodPost, "/scheduled", nil)
 	if err != nil {

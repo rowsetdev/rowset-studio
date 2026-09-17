@@ -30,6 +30,29 @@ func TestClassificationIgnoresCommentsAndStrings(t *testing.T) {
 	}
 }
 
+func TestVendorMutationCommandsAreWrites(t *testing.T) {
+	queries := []string{
+		"DO $$ BEGIN UPDATE users SET active=false; END $$",
+		"LOAD DATA INFILE 'users.csv' INTO TABLE users",
+		"BULK INSERT users FROM 'users.csv'",
+		"OPTIMIZE TABLE events FINAL",
+		"SYSTEM RELOAD CONFIG",
+		"PUT file:///tmp/users.csv @stage",
+		"REMOVE @stage/users.csv",
+		"REFRESH MATERIALIZED VIEW totals",
+		"DBCC SHRINKDATABASE(app)",
+	}
+	for _, query := range queries {
+		info, err := Parse(query)
+		if err != nil {
+			t.Fatalf("Parse(%q): %v", query, err)
+		}
+		if info.Kind != DDL || !IsWrite(info.Kind) {
+			t.Fatalf("%q classified as %s", query, info.Kind)
+		}
+	}
+}
+
 func TestSessionControlClassification(t *testing.T) {
 	for _, query := range []string{"SET QUOTED_IDENTIFIER OFF", "BEGIN", "COMMIT", "ROLLBACK", "SAVEPOINT before_edit", "USE archive"} {
 		info, err := Parse(query)

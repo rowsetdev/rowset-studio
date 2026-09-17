@@ -12,6 +12,7 @@ import (
 	_ "time/tzdata" // time zones on systems without a zoneinfo database (Windows)
 
 	"github.com/dbaopsio/rowset-studio/rowset-core/internal/domain"
+	"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine"
 	"github.com/dbaopsio/rowset-studio/rowset-core/internal/id"
 	"github.com/dbaopsio/rowset-studio/rowset-core/internal/store"
 	sqlguard "github.com/dbaopsio/rowset-studio/rowset-parser"
@@ -196,6 +197,9 @@ func (s *Server) validateScheduled(r *http.Request, identity domain.Identity, in
 	connection, err := s.store.Connection(r.Context(), input.ConnectionID)
 	if err != nil {
 		return "", errors.New("unknown connection")
+	}
+	if !engine.SupportsScheduledSQL(connection.Engine) {
+		return "", errors.New("scheduled queries are not available for this engine")
 	}
 	role, err := s.store.UserRole(r.Context(), identity.UserID)
 	if err != nil || !s.canUseConnection(r, identity, role.ID, connection) {

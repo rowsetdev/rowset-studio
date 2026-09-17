@@ -1,0 +1,17 @@
+{"Time":"2026-09-16T22:10:52.40157+03:00","Action":"start","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine"}
+{"Time":"2026-09-16T22:10:53.429175+03:00","Action":"run","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Test":"TestLiveAdditionalServers"}
+{"Time":"2026-09-16T22:10:53.429545+03:00","Action":"output","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Test":"TestLiveAdditionalServers","Output":"=== RUN   TestLiveAdditionalServers\n"}
+{"Time":"2026-09-16T22:10:53.429609+03:00","Action":"run","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Test":"TestLiveAdditionalServers/clickhouse"}
+{"Time":"2026-09-16T22:10:53.429619+03:00","Action":"output","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Test":"TestLiveAdditionalServers/clickhouse","Output":"=== RUN   TestLiveAdditionalServers/clickhouse\n"}
+{"Time":"2026-09-16T22:10:53.456438+03:00","Action":"output","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Test":"TestLiveAdditionalServers/clickhouse","Output":"--- PASS: TestLiveAdditionalServers/clickhouse (0.03s)\n"}
+{"Time":"2026-09-16T22:10:53.456453+03:00","Action":"pass","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Test":"TestLiveAdditionalServers/clickhouse","Elapsed":0.03}
+{"Time":"2026-09-16T22:10:53.45672+03:00","Action":"run","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Test":"TestLiveAdditionalServers/mongodb"}
+{"Time":"2026-09-16T22:10:53.456726+03:00","Action":"output","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Test":"TestLiveAdditionalServers/mongodb","Output":"=== RUN   TestLiveAdditionalServers/mongodb\n"}
+{"Time":"2026-09-16T22:10:53.456736+03:00","Action":"output","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Test":"TestLiveAdditionalServers/mongodb","Output":"    additional_test.go:106: additional test server not configured\n"}
+{"Time":"2026-09-16T22:10:53.456746+03:00","Action":"output","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Test":"TestLiveAdditionalServers/mongodb","Output":"--- SKIP: TestLiveAdditionalServers/mongodb (0.00s)\n"}
+{"Time":"2026-09-16T22:10:53.456748+03:00","Action":"skip","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Test":"TestLiveAdditionalServers/mongodb","Elapsed":0}
+{"Time":"2026-09-16T22:10:53.456753+03:00","Action":"output","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Test":"TestLiveAdditionalServers","Output":"--- PASS: TestLiveAdditionalServers (0.03s)\n"}
+{"Time":"2026-09-16T22:10:53.456755+03:00","Action":"pass","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Test":"TestLiveAdditionalServers","Elapsed":0.03}
+{"Time":"2026-09-16T22:10:53.45677+03:00","Action":"output","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Output":"PASS\n"}
+{"Time":"2026-09-16T22:10:53.457497+03:00","Action":"output","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Output":"ok  \tgithub.com/dbaopsio/rowset-studio/rowset-core/internal/engine\t1.051s\n"}
+{"Time":"2026-09-16T22:10:53.457519+03:00","Action":"pass","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Elapsed":1.056}

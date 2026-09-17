@@ -1,0 +1,24 @@
+{
+  "engine": "clickhouse",
+  "status": "pass",
+  "image": "clickhouse/clickhouse-server:25.8",
+  "mode": "disposable",
+  "tests": [
+    {
+      "test": "TestLiveAdditionalServers/clickhouse",
+      "result": "pass",
+      "elapsed": 0.03
+    },
+    {
+      "test": "TestLiveAdditionalServers/mongodb",
+      "result": "skip",
+      "elapsed": 0
+    },
+    {
+      "test": "TestLiveAdditionalServers",
+      "result": "pass",
+      "elapsed": 0.03
+    }
+  ],
+  "exit_code": 0
+}

@@ -150,9 +150,10 @@ func parseDialect(dialect Dialect, sql string) (Info, error) {
 		info.Kind, info.IsDrop = DDL, true
 	case "truncate":
 		info.Kind, info.IsTruncate = DDL, true
-	case "set", "use", "begin", "start", "commit", "rollback", "savepoint", "release":
+	case "set", "use", "begin", "start", "commit", "rollback", "savepoint", "release", "discard":
 		info.Kind = Session
-	case "create", "alter", "rename", "comment", "grant", "revoke", "call", "copy", "execute", "exec", "vacuum", "analyze", "attach", "detach":
+	case "create", "alter", "rename", "comment", "grant", "revoke", "call", "copy", "execute", "exec", "vacuum", "analyze", "attach", "detach",
+		"do", "load", "bulk", "optimize", "system", "kill", "put", "get", "remove", "undrop", "refresh", "reindex", "cluster", "dbcc":
 		info.Kind = DDL
 	default:
 		info.Kind = Other

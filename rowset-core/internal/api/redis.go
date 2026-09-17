@@ -88,3 +88,89 @@ func (s *Server) redisScan(w http.ResponseWriter, r *http.Request) {
 	s.recordActivity(r, connection.ID, string(raw), "success", int64(len(entries)), duration, "", "", auditMeta{decision: "allow"})
 	writeJSON(w, 200, map[string]any{"entries": entries, "cursor": cursor, "durationMs": duration, "limit": input.Limit})
 }
+
+func (s *Server) redisWrite(w http.ResponseWriter, r *http.Request) {
+	connection, ok := s.authorizedConnection(w, r)
+	if !ok {
+		return
+	}
+	identity := identityFromContext(r.Context())
+	if connection.Engine != "redis" && connection.Engine != "valkey" || s.config.Shared || !identity.IsAdmin() {
+		writeError(w, 403, "UNSUPPORTED", "key writes are available to personal workspace administrators only")
+		return
+	}
+	var input engine.RedisWriteInput
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	input.Key = strings.TrimSpace(input.Key)
+	if input.Key == "" {
+		writeError(w, 400, "BAD_REQUEST", "key is required")
+		return
+	}
+	database := input.Database
+	if database == "" {
+		database = connection.Database
+	}
+	quote := func(v string) string { return `"` + strings.ReplaceAll(v, `"`, `""`) + `"` }
+	statement := "UPDATE " + quote(database) + "." + quote(input.Key) + ` SET "value" = 'rowset' WHERE "__rowset_key__" IS NOT NULL`
+	raw, _ := json.Marshal(input)
+	target, ctx, cancel, run := s.nosqlWriteGuard(w, r, connection, database, statement, string(raw))
+	if !run {
+		return
+	}
+	defer cancel()
+	started := time.Now()
+	err := s.engines.RedisWrite(ctx, target, input)
+	duration := time.Since(started).Milliseconds()
+	if err != nil {
+		s.recordActivity(r, connection.ID, string(raw), "error", 0, duration, "", "", auditMeta{decision: "allow", errorMessage: err.Error()})
+		writeError(w, 502, "EXEC_ERROR", err.Error())
+		return
+	}
+	s.recordActivity(r, connection.ID, string(raw), "success", 1, duration, "", "", auditMeta{decision: "allow"})
+	writeJSON(w, 200, map[string]any{"durationMs": duration})
+}
+
+func (s *Server) redisDelete(w http.ResponseWriter, r *http.Request) {
+	connection, ok := s.authorizedConnection(w, r)
+	if !ok {
+		return
+	}
+	identity := identityFromContext(r.Context())
+	if connection.Engine != "redis" && connection.Engine != "valkey" || s.config.Shared || !identity.IsAdmin() {
+		writeError(w, 403, "UNSUPPORTED", "key writes are available to personal workspace administrators only")
+		return
+	}
+	var input engine.RedisDeleteInput
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	input.Key = strings.TrimSpace(input.Key)
+	if input.Key == "" {
+		writeError(w, 400, "BAD_REQUEST", "key is required")
+		return
+	}
+	database := input.Database
+	if database == "" {
+		database = connection.Database
+	}
+	quote := func(v string) string { return `"` + strings.ReplaceAll(v, `"`, `""`) + `"` }
+	statement := "DELETE FROM " + quote(database) + "." + quote(input.Key) + ` WHERE "__rowset_key__" IS NOT NULL`
+	raw, _ := json.Marshal(input)
+	target, ctx, cancel, run := s.nosqlWriteGuard(w, r, connection, database, statement, string(raw))
+	if !run {
+		return
+	}
+	defer cancel()
+	started := time.Now()
+	deleted, err := s.engines.RedisDelete(ctx, target, input)
+	duration := time.Since(started).Milliseconds()
+	if err != nil {
+		s.recordActivity(r, connection.ID, string(raw), "error", 0, duration, "", "", auditMeta{decision: "allow", errorMessage: err.Error()})
+		writeError(w, 502, "EXEC_ERROR", err.Error())
+		return
+	}
+	s.recordActivity(r, connection.ID, string(raw), "success", deleted, duration, "", "", auditMeta{decision: "allow"})
+	writeJSON(w, 200, map[string]any{"deletedCount": deleted, "durationMs": duration})
+}

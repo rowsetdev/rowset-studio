@@ -179,8 +179,23 @@ type statementOutcome struct {
 // uses, as the same person, so policies, row backups, timeouts and the audit
 // trail apply to each connection exactly as they would on their own.
 func (s *Server) runStatementFor(ctx context.Context, r *http.Request, target multiRunTarget, sql string, backup bool) statementOutcome {
-	body, _ := json.Marshal(map[string]any{"sql": sql, "database": target.Database, "backup": backup})
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "/api/connections/"+target.ConnectionID+"/query", bytes.NewReader(body))
+	connection, err := s.store.Connection(ctx, target.ConnectionID)
+	if err != nil {
+		return statementOutcome{err: err.Error()}
+	}
+	endpoint := "/api/connections/" + target.ConnectionID + "/query"
+	input := map[string]any{"sql": sql, "database": target.Database, "backup": backup}
+	handler := s.runQuery
+	switch connection.Engine {
+	case "cassandra":
+		endpoint = "/api/connections/" + target.ConnectionID + "/cassandra/query"
+		input = map[string]any{"query": sql, "keyspace": target.Database}
+		handler = s.cassandraQuery
+	case "mongodb", "redis", "valkey", "elasticsearch":
+		return statementOutcome{err: "run on several connections is not available for this engine"}
+	}
+	body, _ := json.Marshal(input)
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return statementOutcome{err: err.Error()}
 	}
@@ -189,7 +204,7 @@ func (s *Server) runStatementFor(ctx context.Context, r *http.Request, target mu
 	request.Header.Set("User-Agent", r.UserAgent())
 	request.RemoteAddr = r.RemoteAddr
 	response := &bufferedResponse{header: http.Header{}, status: http.StatusOK}
-	s.runQuery(response, request)
+	handler(response, request)
 
 	raw := response.body.Bytes()
 	var summary struct {

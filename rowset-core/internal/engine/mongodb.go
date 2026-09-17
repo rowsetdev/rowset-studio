@@ -114,6 +114,126 @@ func ParseMongoFilter(raw json.RawMessage) (bson.D, error) {
 	return filter, nil
 }
 
+type MongoInsertInput struct {
+	Database   string          `json:"database"`
+	Collection string          `json:"collection"`
+	Document   json.RawMessage `json:"document"`
+}
+
+// MongoInsertOne inserts one document, returning its _id as Extended JSON.
+func (m *Manager) MongoInsertOne(ctx context.Context, connection Connection, input MongoInsertInput) (string, error) {
+	if strings.TrimSpace(input.Collection) == "" {
+		return "", errors.New("collection is required")
+	}
+	var document bson.D
+	if err := bson.UnmarshalExtJSON(input.Document, false, &document); err != nil {
+		return "", fmt.Errorf("document must be an Extended JSON object: %w", err)
+	}
+	client, err := mongoClient(connection)
+	if err != nil {
+		return "", err
+	}
+	defer closeMongo(client)
+	result, err := client.Database(connection.Database).Collection(input.Collection).InsertOne(ctx, document)
+	if err != nil {
+		return "", err
+	}
+	id, err := bson.MarshalExtJSON(result.InsertedID, true, false)
+	if err != nil {
+		return "", nil
+	}
+	return string(id), nil
+}
+
+type MongoUpdateInput struct {
+	Database   string          `json:"database"`
+	Collection string          `json:"collection"`
+	Filter     json.RawMessage `json:"filter"`
+	Update     json.RawMessage `json:"update"`
+}
+
+// MongoUpdateOne applies an update-operator document ($set, $unset, ...) to
+// the first document matching filter. A full-document replacement is
+// rejected: every operator update stays reviewable field by field.
+func (m *Manager) MongoUpdateOne(ctx context.Context, connection Connection, input MongoUpdateInput) (int64, int64, error) {
+	if strings.TrimSpace(input.Collection) == "" {
+		return 0, 0, errors.New("collection is required")
+	}
+	filter, err := ParseMongoFilter(input.Filter)
+	if err != nil {
+		return 0, 0, err
+	}
+	if !mongoHasPredicate(filter) {
+		return 0, 0, errors.New("update requires a non-empty filter")
+	}
+	var update bson.D
+	if err := bson.UnmarshalExtJSON(input.Update, false, &update); err != nil {
+		return 0, 0, fmt.Errorf("update must be an Extended JSON object: %w", err)
+	}
+	if len(update) == 0 {
+		return 0, 0, errors.New("update is required")
+	}
+	for _, entry := range update {
+		if !strings.HasPrefix(entry.Key, "$") {
+			return 0, 0, errors.New("update must use operators such as $set, $unset or $inc; a full-document replacement is not supported")
+		}
+	}
+	client, err := mongoClient(connection)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer closeMongo(client)
+	result, err := client.Database(connection.Database).Collection(input.Collection).UpdateOne(ctx, filter, update)
+	if err != nil {
+		return 0, 0, err
+	}
+	return result.MatchedCount, result.ModifiedCount, nil
+}
+
+type MongoDeleteInput struct {
+	Database   string          `json:"database"`
+	Collection string          `json:"collection"`
+	Filter     json.RawMessage `json:"filter"`
+}
+
+// MongoDeleteOne removes the first document matching filter.
+func (m *Manager) MongoDeleteOne(ctx context.Context, connection Connection, input MongoDeleteInput) (int64, error) {
+	if strings.TrimSpace(input.Collection) == "" {
+		return 0, errors.New("collection is required")
+	}
+	filter, err := ParseMongoFilter(input.Filter)
+	if err != nil {
+		return 0, err
+	}
+	if !mongoHasPredicate(filter) {
+		return 0, errors.New("delete requires a non-empty filter")
+	}
+	client, err := mongoClient(connection)
+	if err != nil {
+		return 0, err
+	}
+	defer closeMongo(client)
+	result, err := client.Database(connection.Database).Collection(input.Collection).DeleteOne(ctx, filter)
+	if err != nil {
+		return 0, err
+	}
+	return result.DeletedCount, nil
+}
+
+// mongoHasPredicate reports whether filter restricts anything, the same
+// conservative rule the API guardrail statement uses for reads.
+func mongoHasPredicate(filter bson.D) bool {
+	for _, entry := range filter {
+		if !strings.HasPrefix(entry.Key, "$") {
+			return true
+		}
+		if clauses, ok := entry.Value.(bson.A); ok && len(clauses) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *Manager) MongoFind(ctx context.Context, connection Connection, input MongoFindInput) ([]json.RawMessage, bool, error) {
 	if strings.TrimSpace(input.Collection) == "" || strings.ContainsRune(input.Collection, 0) {
 		return nil, false, errors.New("collection is required")

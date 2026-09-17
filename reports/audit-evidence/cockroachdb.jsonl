@@ -1,0 +1,8 @@
+{"Time":"2026-09-16T22:08:40.354893+03:00","Action":"start","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine"}
+{"Time":"2026-09-16T22:08:41.428737+03:00","Action":"run","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Test":"TestLiveCockroachDB"}
+{"Time":"2026-09-16T22:08:41.429515+03:00","Action":"output","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Test":"TestLiveCockroachDB","Output":"=== RUN   TestLiveCockroachDB\n"}
+{"Time":"2026-09-16T22:08:42.162732+03:00","Action":"output","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Test":"TestLiveCockroachDB","Output":"--- PASS: TestLiveCockroachDB (0.73s)\n"}
+{"Time":"2026-09-16T22:08:42.162768+03:00","Action":"pass","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Test":"TestLiveCockroachDB","Elapsed":0.73}
+{"Time":"2026-09-16T22:08:42.162917+03:00","Action":"output","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Output":"PASS\n"}
+{"Time":"2026-09-16T22:08:42.164017+03:00","Action":"output","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Output":"ok  \tgithub.com/dbaopsio/rowset-studio/rowset-core/internal/engine\t1.805s\n"}
+{"Time":"2026-09-16T22:08:42.164056+03:00","Action":"pass","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Elapsed":1.8090000000000002}

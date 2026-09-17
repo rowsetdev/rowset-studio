@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -16,6 +18,7 @@ func TestLivePinnedSessionsCommitAndRollbackAcrossEngines(t *testing.T) {
 	}{
 		{"postgres", "ROWSET_MATRIX_POSTGRES_PASSWORD", "postgres", "rowset_e2e", "public.rowset_tx_probe", 55432, []string{`DROP TABLE IF EXISTS public.rowset_tx_probe`, `CREATE TABLE public.rowset_tx_probe(id int primary key,note varchar(40))`}},
 		{"mysql", "ROWSET_MATRIX_MYSQL_PASSWORD", "root", "rowset_e2e", "rowset_tx_probe", 53306, []string{`DROP TABLE IF EXISTS rowset_tx_probe`, `CREATE TABLE rowset_tx_probe(id int primary key,note varchar(40))`}},
+		{"mariadb", "ROWSET_MATRIX_MARIADB_PASSWORD", "root", "rowset_e2e", "rowset_tx_probe", 53307, []string{`DROP TABLE IF EXISTS rowset_tx_probe`, `CREATE TABLE rowset_tx_probe(id int primary key,note varchar(40))`}},
 		{"mssql", "ROWSET_MATRIX_MSSQL_PASSWORD", "sa", "rowset_e2e", "dbo.rowset_tx_probe", 51433, []string{`IF OBJECT_ID('dbo.rowset_tx_probe','U') IS NOT NULL DROP TABLE dbo.rowset_tx_probe`, `CREATE TABLE dbo.rowset_tx_probe(id int primary key,note varchar(40))`}},
 	}
 	for _, test := range tests {
@@ -28,7 +31,7 @@ func TestLivePinnedSessionsCommitAndRollbackAcrossEngines(t *testing.T) {
 			defer cancel()
 			manager := NewManager()
 			defer manager.Close()
-			connection := Connection{ID: "tx-" + test.name, Engine: test.name, Host: "127.0.0.1", Port: test.port, Database: test.database, Username: test.user, Password: password, PoolSize: 2}
+			connection := Connection{ID: "tx-" + test.name, Engine: test.name, Host: "127.0.0.1", Port: liveSQLPort(t, test.name, test.port), Database: test.database, Username: test.user, Password: password, PoolSize: 2}
 			for _, statement := range test.setup {
 				if _, err := manager.Execute(ctx, connection, statement, 0); err != nil {
 					t.Fatal(err)
@@ -68,6 +71,19 @@ func TestLivePinnedSessionsCommitAndRollbackAcrossEngines(t *testing.T) {
 			}
 		})
 	}
+}
+
+func liveSQLPort(t *testing.T, name string, fallback int) int {
+	t.Helper()
+	raw := os.Getenv("ROWSET_MATRIX_" + strings.ToUpper(name) + "_PORT")
+	if raw == "" {
+		return fallback
+	}
+	port, err := strconv.Atoi(raw)
+	if err != nil || port < 1 || port > 65535 {
+		t.Fatalf("invalid live test port %q for %s", raw, name)
+	}
+	return port
 }
 
 func sessionCount(t *testing.T, ctx context.Context, session *Session, table string) int64 {

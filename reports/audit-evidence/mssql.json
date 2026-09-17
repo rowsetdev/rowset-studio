@@ -1,0 +1,209 @@
+{
+  "engine": "mssql",
+  "status": "pass",
+  "image": "mcr.microsoft.com/mssql/server@sha256:97b448857967be55e005424a660056fe6d51814435804dc07e8f79f028bab5fb",
+  "mode": "disposable",
+  "tests": [
+    {
+      "test": "TestLiveAllTypes/postgres",
+      "result": "skip",
+      "elapsed": 0
+    },
+    {
+      "test": "TestLiveAllTypes/mysql",
+      "result": "skip",
+      "elapsed": 0
+    },
+    {
+      "test": "TestLiveAllTypes/mariadb",
+      "result": "skip",
+      "elapsed": 0
+    },
+    {
+      "test": "TestLiveExplainReturnsReadablePlans/postgres",
+      "result": "skip",
+      "elapsed": 0
+    },
+    {
+      "test": "TestLiveExplainReturnsReadablePlans/mysql",
+      "result": "skip",
+      "elapsed": 0
+    },
+    {
+      "test": "TestLiveExplainReturnsReadablePlans/mariadb",
+      "result": "skip",
+      "elapsed": 0
+    },
+    {
+      "test": "TestLiveExplainReturnsReadablePlans/mssql",
+      "result": "pass",
+      "elapsed": 0.04
+    },
+    {
+      "test": "TestLiveExplainReturnsReadablePlans",
+      "result": "pass",
+      "elapsed": 0.04
+    },
+    {
+      "test": "TestLiveEngineDatatypeSyntaxAndLargeStreamMatrix/postgres",
+      "result": "skip",
+      "elapsed": 0
+    },
+    {
+      "test": "TestLiveEngineDatatypeSyntaxAndLargeStreamMatrix/mysql",
+      "result": "skip",
+      "elapsed": 0
+    },
+    {
+      "test": "TestLiveEngineDatatypeSyntaxAndLargeStreamMatrix/mssql",
+      "result": "pass",
+      "elapsed": 0.82
+    },
+    {
+      "test": "TestLiveEngineDatatypeSyntaxAndLargeStreamMatrix",
+      "result": "pass",
+      "elapsed": 0.82
+    },
+    {
+      "test": "TestLiveAllTypes/sqlserver/explain_and_schema",
+      "result": "pass",
+      "elapsed": 0.61
+    },
+    {
+      "test": "TestLiveMSSQLCompositeFKAndCoveringIndexDDL",
+      "result": "pass",
+      "elapsed": 1.24
+    },
+    {
+      "test": "TestLivePinnedSessionsCommitAndRollbackAcrossEngines/postgres",
+      "result": "skip",
+      "elapsed": 0
+    },
+    {
+      "test": "TestLivePinnedSessionsCommitAndRollbackAcrossEngines/mysql",
+      "result": "skip",
+      "elapsed": 0
+    },
+    {
+      "test": "TestLivePinnedSessionsCommitAndRollbackAcrossEngines/mariadb",
+      "result": "skip",
+      "elapsed": 0
+    },
+    {
+      "test": "TestLivePinnedSessionsCommitAndRollbackAcrossEngines/mssql",
+      "result": "pass",
+      "elapsed": 0.05
+    },
+    {
+      "test": "TestLivePinnedSessionsCommitAndRollbackAcrossEngines",
+      "result": "pass",
+      "elapsed": 0.05
+    },
+    {
+      "test": "TestLiveAllTypes/sqlserver/update_backup_and_restore_script",
+      "result": "pass",
+      "elapsed": 0.53
+    },
+    {
+      "test": "TestLiveAllTypes/sqlserver/delete_backup_and_restore",
+      "result": "pass",
+      "elapsed": 0.14
+    },
+    {
+      "test": "TestLiveAllTypes/sqlserver/export_and_import",
+      "result": "pass",
+      "elapsed": 0.17
+    },
+    {
+      "test": "TestLiveAllTypes/sqlserver/large_table",
+      "result": "pass",
+      "elapsed": 0.43
+    },
+    {
+      "test": "TestLiveAllTypes/sqlserver",
+      "result": "pass",
+      "elapsed": 3.96
+    },
+    {
+      "test": "TestLiveAllTypes",
+      "result": "pass",
+      "elapsed": 3.98
+    },
+    {
+      "test": "TestLiveObjectDDL/postgres",
+      "result": "skip",
+      "elapsed": 0
+    },
+    {
+      "test": "TestLiveObjectDDL/mysql",
+      "result": "skip",
+      "elapsed": 0
+    },
+    {
+      "test": "TestLiveObjectDDL/mariadb",
+      "result": "skip",
+      "elapsed": 0
+    },
+    {
+      "test": "TestLiveObjectDDL/sqlserver",
+      "result": "pass",
+      "elapsed": 0.43
+    },
+    {
+      "test": "TestLiveObjectDDL",
+      "result": "pass",
+      "elapsed": 0.45
+    },
+    {
+      "test": "TestLiveTableExport/postgres",
+      "result": "skip",
+      "elapsed": 0
+    },
+    {
+      "test": "TestLiveTableExport/mysql",
+      "result": "skip",
+      "elapsed": 0
+    },
+    {
+      "test": "TestLiveTableExport/mariadb",
+      "result": "skip",
+      "elapsed": 0
+    },
+    {
+      "test": "TestLiveTableExport/sqlserver",
+      "result": "pass",
+      "elapsed": 0.07
+    },
+    {
+      "test": "TestLiveTableExport",
+      "result": "pass",
+      "elapsed": 0.07
+    },
+    {
+      "test": "TestLiveDatabaseObjects/postgres",
+      "result": "skip",
+      "elapsed": 0
+    },
+    {
+      "test": "TestLiveDatabaseObjects/mysql",
+      "result": "skip",
+      "elapsed": 0
+    },
+    {
+      "test": "TestLiveDatabaseObjects/mariadb",
+      "result": "skip",
+      "elapsed": 0
+    },
+    {
+      "test": "TestLiveDatabaseObjects/sqlserver",
+      "result": "pass",
+      "elapsed": 0.42
+    },
+    {
+      "test": "TestLiveDatabaseObjects",
+      "result": "pass",
+      "elapsed": 0.44
+    }
+  ],
+  "exit_code": 0
+}

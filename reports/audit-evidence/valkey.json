@@ -1,0 +1,14 @@
+{
+  "engine": "valkey",
+  "status": "pass",
+  "image": "valkey/valkey:8.0",
+  "mode": "disposable",
+  "tests": [
+    {
+      "test": "TestLiveRedis",
+      "result": "pass",
+      "elapsed": 0.03
+    }
+  ],
+  "exit_code": 0
+}

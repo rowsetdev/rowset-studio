@@ -8,7 +8,7 @@ import SqlCode from "./SqlCode";
 import { colorizeJson } from "./monacoSetup";
 import { resultCSV, resultJSON } from "./resultExport";
 import { filteredIndexes, type ResultFilter, type FilterOperator } from "./resultFilter";
-import { compareCells } from "./resultSort";
+import { sortRowIndexes } from "./resultSort";
 
 // Renders a query result set. Values are rendered as text; NULL is shown
 // explicitly. Sorting and exports cover the currently received, bounded rows.
@@ -243,7 +243,7 @@ function GridView({ result, indexes, filterKey, editable, edits, onEdit, drafts 
   const order = useMemo(() => {
     if (!sort) return indexes;
     const { col, dir } = sort;
-    return [...indexes].sort((a, b) => compareCells(result.rows[a][col], result.rows[b][col], result.columnTypes?.[col], dir));
+    return sortRowIndexes(result.rows, indexes, col, result.columnTypes?.[col], dir);
     // rowCount grows while a result streams in; the array itself is reused.
   }, [result.rows, result.rowCount, result.columnTypes, sort, indexes]);
 

@@ -99,6 +99,135 @@ func (s *Server) mongoFind(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"documents": docs, "truncated": truncated, "durationMs": duration, "limit": input.Limit})
 }
 
+func (s *Server) mongoInsert(w http.ResponseWriter, r *http.Request) {
+	connection, ok := s.authorizedConnection(w, r)
+	if !ok {
+		return
+	}
+	identity := identityFromContext(r.Context())
+	if connection.Engine != "mongodb" || s.config.Shared || !identity.IsAdmin() {
+		writeError(w, 403, "UNSUPPORTED", "document writes are available to personal workspace administrators only")
+		return
+	}
+	var input engine.MongoInsertInput
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	input.Collection = strings.TrimSpace(input.Collection)
+	if input.Collection == "" {
+		writeError(w, 400, "BAD_REQUEST", "collection is required")
+		return
+	}
+	database := input.Database
+	if database == "" {
+		database = connection.Database
+	}
+	quote := func(v string) string { return `"` + strings.ReplaceAll(v, `"`, `""`) + `"` }
+	statement := "INSERT INTO " + quote(database) + "." + quote(input.Collection) + ` ("document") VALUES ('rowset')`
+	raw, _ := json.Marshal(input)
+	target, ctx, cancel, run := s.nosqlWriteGuard(w, r, connection, database, statement, string(raw))
+	if !run {
+		return
+	}
+	defer cancel()
+	started := time.Now()
+	id, err := s.engines.MongoInsertOne(ctx, target, input)
+	duration := time.Since(started).Milliseconds()
+	if err != nil {
+		s.recordActivity(r, connection.ID, string(raw), "error", 0, duration, "", "", auditMeta{decision: "allow", errorMessage: err.Error()})
+		writeError(w, 502, "EXEC_ERROR", err.Error())
+		return
+	}
+	s.recordActivity(r, connection.ID, string(raw), "success", 1, duration, "", "", auditMeta{decision: "allow"})
+	writeJSON(w, 200, map[string]any{"id": json.RawMessage(id), "durationMs": duration})
+}
+
+func (s *Server) mongoUpdate(w http.ResponseWriter, r *http.Request) {
+	connection, ok := s.authorizedConnection(w, r)
+	if !ok {
+		return
+	}
+	identity := identityFromContext(r.Context())
+	if connection.Engine != "mongodb" || s.config.Shared || !identity.IsAdmin() {
+		writeError(w, 403, "UNSUPPORTED", "document writes are available to personal workspace administrators only")
+		return
+	}
+	var input engine.MongoUpdateInput
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	input.Collection = strings.TrimSpace(input.Collection)
+	if input.Collection == "" {
+		writeError(w, 400, "BAD_REQUEST", "collection is required")
+		return
+	}
+	database := input.Database
+	if database == "" {
+		database = connection.Database
+	}
+	quote := func(v string) string { return `"` + strings.ReplaceAll(v, `"`, `""`) + `"` }
+	statement := "UPDATE " + quote(database) + "." + quote(input.Collection) + ` SET "document" = 'rowset' WHERE "__rowset_document_filter__" IS NOT NULL`
+	raw, _ := json.Marshal(input)
+	target, ctx, cancel, run := s.nosqlWriteGuard(w, r, connection, database, statement, string(raw))
+	if !run {
+		return
+	}
+	defer cancel()
+	started := time.Now()
+	matched, modified, err := s.engines.MongoUpdateOne(ctx, target, input)
+	duration := time.Since(started).Milliseconds()
+	if err != nil {
+		s.recordActivity(r, connection.ID, string(raw), "error", 0, duration, "", "", auditMeta{decision: "allow", errorMessage: err.Error()})
+		writeError(w, 502, "EXEC_ERROR", err.Error())
+		return
+	}
+	s.recordActivity(r, connection.ID, string(raw), "success", modified, duration, "", "", auditMeta{decision: "allow"})
+	writeJSON(w, 200, map[string]any{"matchedCount": matched, "modifiedCount": modified, "durationMs": duration})
+}
+
+func (s *Server) mongoDelete(w http.ResponseWriter, r *http.Request) {
+	connection, ok := s.authorizedConnection(w, r)
+	if !ok {
+		return
+	}
+	identity := identityFromContext(r.Context())
+	if connection.Engine != "mongodb" || s.config.Shared || !identity.IsAdmin() {
+		writeError(w, 403, "UNSUPPORTED", "document writes are available to personal workspace administrators only")
+		return
+	}
+	var input engine.MongoDeleteInput
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	input.Collection = strings.TrimSpace(input.Collection)
+	if input.Collection == "" {
+		writeError(w, 400, "BAD_REQUEST", "collection is required")
+		return
+	}
+	database := input.Database
+	if database == "" {
+		database = connection.Database
+	}
+	quote := func(v string) string { return `"` + strings.ReplaceAll(v, `"`, `""`) + `"` }
+	statement := "DELETE FROM " + quote(database) + "." + quote(input.Collection) + ` WHERE "__rowset_document_filter__" IS NOT NULL`
+	raw, _ := json.Marshal(input)
+	target, ctx, cancel, run := s.nosqlWriteGuard(w, r, connection, database, statement, string(raw))
+	if !run {
+		return
+	}
+	defer cancel()
+	started := time.Now()
+	deleted, err := s.engines.MongoDeleteOne(ctx, target, input)
+	duration := time.Since(started).Milliseconds()
+	if err != nil {
+		s.recordActivity(r, connection.ID, string(raw), "error", 0, duration, "", "", auditMeta{decision: "allow", errorMessage: err.Error()})
+		writeError(w, 502, "EXEC_ERROR", err.Error())
+		return
+	}
+	s.recordActivity(r, connection.ID, string(raw), "success", deleted, duration, "", "", auditMeta{decision: "allow"})
+	writeJSON(w, 200, map[string]any{"deletedCount": deleted, "durationMs": duration})
+}
+
 // A literal WHERE TRUE is deliberately rejected by the SQL policy parser.
 // Count field predicates and conservative logical combinations instead of
 // treating every nonempty MongoDB filter (e.g. {$or:[{}]}) as restrictive.

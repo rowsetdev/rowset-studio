@@ -1,0 +1,8 @@
+{"Time":"2026-09-17T09:17:03.847471+03:00","Action":"start","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine"}
+{"Time":"2026-09-17T09:17:05.185218+03:00","Action":"run","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Test":"TestLiveCassandra"}
+{"Time":"2026-09-17T09:17:05.186839+03:00","Action":"output","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Test":"TestLiveCassandra","Output":"=== RUN   TestLiveCassandra\n"}
+{"Time":"2026-09-17T09:17:05.993078+03:00","Action":"output","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Test":"TestLiveCassandra","Output":"--- PASS: TestLiveCassandra (0.81s)\n"}
+{"Time":"2026-09-17T09:17:05.993195+03:00","Action":"pass","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Test":"TestLiveCassandra","Elapsed":0.81}
+{"Time":"2026-09-17T09:17:05.994073+03:00","Action":"output","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Output":"PASS\n"}
+{"Time":"2026-09-17T09:17:05.995112+03:00","Action":"output","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Output":"ok  \tgithub.com/dbaopsio/rowset-studio/rowset-core/internal/engine\t2.132s\n"}
+{"Time":"2026-09-17T09:17:05.995136+03:00","Action":"pass","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Elapsed":2.148}

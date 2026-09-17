@@ -1,0 +1,14 @@
+{
+  "engine": "redis",
+  "status": "pass",
+  "image": "redis:7",
+  "mode": "disposable",
+  "tests": [
+    {
+      "test": "TestLiveRedis",
+      "result": "pass",
+      "elapsed": 0.03
+    }
+  ],
+  "exit_code": 0
+}

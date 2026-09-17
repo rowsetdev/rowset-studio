@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine"
 )
 
 // objectDDL returns the statement that creates a database object, so the
@@ -11,6 +13,10 @@ import (
 func (s *Server) objectDDL(w http.ResponseWriter, r *http.Request) {
 	connection, ok := s.authorizedConnection(w, r)
 	if !ok {
+		return
+	}
+	if !engine.EngineCapabilities(connection.Engine).DDL {
+		writeError(w, http.StatusBadRequest, "UNSUPPORTED", "DDL viewing is not available for this engine")
 		return
 	}
 	query := r.URL.Query()

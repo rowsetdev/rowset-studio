@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -51,6 +52,30 @@ func TestInstanceReportsPersonalMode(t *testing.T) {
 	s.Handler().ServeHTTP(w, httptest.NewRequest("GET", "/api/meta/instance", nil))
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `"mode":"personal"`) {
 		t.Fatal(w.Body.String())
+	}
+}
+
+func TestInstancePublishesEngineCapabilities(t *testing.T) {
+	s, _ := personalServer(t)
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, httptest.NewRequest("GET", "/api/meta/instance", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("metadata: %d %s", w.Code, w.Body.String())
+	}
+	var response struct {
+		Capabilities map[string]engine.Capabilities `json:"engineCapabilities"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Capabilities["snowflake"].DDL || !response.Capabilities["cockroachdb"].Explain || !response.Capabilities["cassandra"].CSVImport {
+		t.Fatalf("incorrect advertised capabilities: %#v", response.Capabilities)
+	}
+	if !response.Capabilities["mongodb"].DocumentWrite || !response.Capabilities["elasticsearch"].DocumentWrite || !response.Capabilities["redis"].KeyWrite || !response.Capabilities["valkey"].KeyWrite {
+		t.Fatalf("missing advertised write capabilities: %#v", response.Capabilities)
+	}
+	if !response.Capabilities["sqlite"].CSVImport || !response.Capabilities["duckdb"].CSVImport {
+		t.Fatalf("file engines should advertise CSV import: %#v", response.Capabilities)
 	}
 }
 

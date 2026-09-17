@@ -25,7 +25,8 @@ export default function MultiRunDialog({
   onClose: () => void;
   onRun: (targets: MultiRunTarget[], statements: string[], concurrency: number) => void;
 }) {
-  const [selected, setSelected] = useState(() => new Set(initialIds.filter((id) => connections.some((connection) => connection.id === id))));
+  const usableConnections = useMemo(() => connections.filter((connection) => !["mongodb", "redis", "valkey", "elasticsearch"].includes(connection.engine)), [connections]);
+  const [selected, setSelected] = useState(() => new Set(initialIds.filter((id) => usableConnections.some((connection) => connection.id === id))));
   const [databases, setDatabases] = useState<Record<string, string>>({});
   const [confirmed, setConfirmed] = useState(false);
   const [filter, setFilter] = useState("");
@@ -35,15 +36,15 @@ export default function MultiRunDialog({
   });
 
   const sharedEngine = useMemo(() => {
-    const engines = new Set(connections.filter((connection) => selected.has(connection.id)).map((connection) => connection.engine.toLowerCase()));
+    const engines = new Set(usableConnections.filter((connection) => selected.has(connection.id)).map((connection) => connection.engine.toLowerCase()));
     return engines.size === 1 ? [...engines][0] : undefined;
-  }, [connections, selected]);
+  }, [usableConnections, selected]);
   const statements = useMemo(() => splitStatements(sql, sharedEngine).map((statement) => statement.sql.trim()).filter(Boolean), [sql, sharedEngine]);
   const changes = scriptChanges(statements);
   const changing = statements.filter((statement) => statementEffect(statement) === "change").length;
-  const chosen = connections.filter((connection) => selected.has(connection.id));
+  const chosen = usableConnections.filter((connection) => selected.has(connection.id));
   const production = chosen.filter((connection) => envKind(connection.environment) === "prod");
-  const visible = connections.filter((connection) => `${connection.name} ${connection.engine} ${connection.environment} ${connection.database}`.toLowerCase().includes(filter.trim().toLowerCase()));
+  const visible = usableConnections.filter((connection) => `${connection.name} ${connection.engine} ${connection.environment} ${connection.database}`.toLowerCase().includes(filter.trim().toLowerCase()));
   // Confirming covers the connections chosen at that moment; changing the
   // choice asks again.
   const ready = chosen.length > 0 && statements.length > 0 && (!changes || confirmed);

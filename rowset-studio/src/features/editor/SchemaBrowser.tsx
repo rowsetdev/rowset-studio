@@ -5,6 +5,8 @@ import { useSchema } from "./useEditor";
 import { ColumnInfo, RoutineInfo, TableInfo, TriggerInfo, exportTable, objectDDL } from "./api";
 import { SchemaActions, quoteIdentifier, tableSelect } from "./schemaActions";
 import CsvImportDialog from "./CsvImportDialog";
+import { useEngineCapabilities } from "../../lib/instance";
+import { useConnections } from "../connections/useConnections";
 import SqlCode from "./SqlCode";
 import { formatDefinition } from "./ddlFormat";
 import RowMenu from "../../components/RowMenu";
@@ -73,6 +75,8 @@ export default function SchemaBrowser({
   search?: string;
 }) {
   const { data, isLoading, isError, error, refetch, isFetching } = useSchema(connectionId, database);
+  const { data: connections = [] } = useConnections();
+  const readOnly = connections.some((connection) => connection.id === connectionId && (connection.readOnly || connection.defaultNodeRole === "secondary"));
   const [filter, setFilter] = useState("");
   const [schemaFilter, setSchemaFilter] = useState("");
 
@@ -197,14 +201,14 @@ export default function SchemaBrowser({
             )}
             <ObjectGroup label={engine === "mongodb" ? "Collections" : "Tables"} count={filteredTables.length === tables.length ? `${tables.length}` : `${filteredTables.length} of ${tables.length}`} forceOpen={Boolean(needle)}>
               {filteredTables.map((t) => (
-                <TableItem key={t.key} engine={engine} schemaName={t.schemaName} table={t.table} triggers={triggersOf(t)} connectionId={connectionId} database={database} />
+                <TableItem key={t.key} engine={engine} schemaName={t.schemaName} table={t.table} triggers={triggersOf(t)} connectionId={connectionId} database={database} readOnly={readOnly} />
               ))}
               {filteredTables.length === 0 && <li className="px-1 py-1 text-[11px] text-slate-400">No matching tables.</li>}
             </ObjectGroup>
             {visibleViews.length > 0 && (
               <ObjectGroup label="Views" count={visibleViews.length}>
                 {visibleViews.map((t) => (
-                  <TableItem key={t.key} engine={engine} schemaName={t.schemaName} table={t.table} triggers={triggersOf(t)} icon="grid" connectionId={connectionId} database={database} />
+                  <TableItem key={t.key} engine={engine} schemaName={t.schemaName} table={t.table} triggers={triggersOf(t)} icon="grid" connectionId={connectionId} database={database} readOnly={readOnly} />
                 ))}
               </ObjectGroup>
             )}
@@ -349,7 +353,7 @@ function TriggerItem({ engine, schemaName, trigger, connectionId, database }: { 
   );
 }
 
-function TableItem({ engine, schemaName, table, triggers = [], connectionId, database, icon = "table" }: { engine: string; schemaName: string; table: TableInfo; triggers?: TriggerInfo[]; connectionId: string; database?: string; icon?: IconName }) {
+function TableItem({ engine, schemaName, table, triggers = [], connectionId, database, readOnly, icon = "table" }: { engine: string; schemaName: string; table: TableInfo; triggers?: TriggerInfo[]; connectionId: string; database?: string; readOnly: boolean; icon?: IconName }) {
   const action = useContext(SchemaActions);
   const [copyState, setCopyState] = useState<"" | "copied" | "failed">("");
   const [exportState, setExportState] = useState<{ status: "" | "running" | "failed"; message?: string }>({ status: "" });
@@ -360,13 +364,15 @@ function TableItem({ engine, schemaName, table, triggers = [], connectionId, dat
   const quotedName = [schemaName, table.name].map(n => quoteIdentifier(engine, n)).join(".");
   // These engines have a query editor now, but no DDL viewer or export path
   // yet (both use the pooled SQL connection these engines don't have).
-  const noDdlOrExport = ["redis", "valkey", "elasticsearch"].includes(engine);
+  const capabilities = useEngineCapabilities(engine);
+  const hasObjectActions = capabilities.ddl || capabilities.csvExport || capabilities.jsonExport || capabilities.sqlExport || capabilities.cqlExport || capabilities.csvImport && !readOnly;
+  const cqlExportable = icon === "table" && capabilities.cqlExport && !table.columns.some((column) => column.dataType.trim().toLowerCase() === "counter");
   const copyName = () => {
     navigator.clipboard.writeText(quotedName)
       .then(() => setCopyState("copied"), () => setCopyState("failed"))
       .finally(() => window.setTimeout(() => setCopyState(""), 1500));
   };
-  const download = (format: "csv" | "json" | "sql") => {
+  const download = (format: "csv" | "json" | "sql" | "cql") => {
     setExportState({ status: "running" });
     exportTable(connectionId, { database, schema: schemaName, table: table.name, format })
       .then((blob) => {
@@ -399,15 +405,16 @@ function TableItem({ engine, schemaName, table, triggers = [], connectionId, dat
         <span className={`shrink-0 items-center gap-0.5 pr-0.5 ${copyState ? "flex" : "hidden group-hover:flex group-focus-within:flex"}`}>
           <RowAction icon="sql" title={engine === "mongodb" ? "Open find query in a new tab" : engine === "redis" || engine === "valkey" ? "Open a key scan in a new tab" : engine === "elasticsearch" ? "Open a search in a new tab" : "Open SELECT in a new tab (does not run it)"} onClick={() => action({ connectionId, database, sql: tableSelect(engine, schemaName, table.name, table.columns.map(c => c.name)) })} />
           <RowAction icon={copyState === "copied" ? "check" : "copy"} title={copyState === "failed" ? "Clipboard unavailable" : copyState === "copied" ? "Copied" : `Copy name: ${quotedName}`} onClick={copyName} tone={copyState === "failed" ? "text-rose-500" : copyState === "copied" ? "text-emerald-600" : undefined} />
-          {!noDdlOrExport && <RowMenu
+          {hasObjectActions && <RowMenu
             label={`More actions for ${qualifiedName}`}
             className="h-5 w-5"
             items={engine === "mongodb" ? [{ label: "Find documents", onSelect: () => action({ connectionId, database, sql: tableSelect(engine, schemaName, table.name) }) }] : [
-              { label: "Show DDL", onSelect: () => setShowingDDL(true) },
-              { label: "Export as CSV", onSelect: () => download("csv"), disabled: exportState.status === "running" },
-              { label: "Export as JSON", onSelect: () => download("json"), disabled: exportState.status === "running" },
-              { label: "Export as SQL (INSERT)", onSelect: () => download("sql"), disabled: exportState.status === "running" || ["sqlite", "duckdb", "clickhouse", "cassandra"].includes(engine) },
-              ...(icon === "table" && !["sqlite", "duckdb", "clickhouse"].includes(engine) ? [{ label: "Import CSV…", onSelect: () => setImporting(true) }] : []),
+              ...(capabilities.ddl ? [{ label: "Show DDL", onSelect: () => setShowingDDL(true) }] : []),
+              ...(capabilities.csvExport ? [{ label: "Export as CSV", onSelect: () => download("csv"), disabled: exportState.status === "running" }] : []),
+              ...(capabilities.jsonExport ? [{ label: "Export as JSON", onSelect: () => download("json"), disabled: exportState.status === "running" }] : []),
+              ...(capabilities.sqlExport ? [{ label: "Export as SQL (INSERT)", onSelect: () => download("sql"), disabled: exportState.status === "running" }] : []),
+              ...(cqlExportable ? [{ label: "Export as CQL (INSERT JSON)", onSelect: () => download("cql"), disabled: exportState.status === "running" }] : []),
+              ...(icon === "table" && capabilities.csvImport && !readOnly ? [{ label: "Import CSV…", onSelect: () => setImporting(true) }] : []),
             ]}
           />}
         </span>

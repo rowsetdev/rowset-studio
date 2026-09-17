@@ -35,7 +35,7 @@ export function compareSchemas(source: SchemaNode, target: SchemaNode): SchemaDi
       const sourceText = x ? columnText(x) : "—", targetText = y ? columnText(y) : "—";
       if (sourceText !== targetText) add({ kind: "column", object: column, status: !x ? "remove" : !y ? "add" : "change", source: sourceText, target: targetText, sourceColumn: x, targetColumn: y });
     }
-    const indexes = (t: TableInfo) => new Map((t.indexes ?? []).map(i => [i.name, `${i.primary ? "PRIMARY" : i.unique ? "UNIQUE" : "INDEX"} (${i.columns.join(", ")})`]));
+    const indexes = (t: TableInfo) => new Map((t.indexes ?? []).map(i => [i.name, `${i.primary ? "PRIMARY" : i.unique ? "UNIQUE" : "INDEX"} (${i.columns.join(", ")})${i.includedColumns?.length ? ` INCLUDE (${i.includedColumns.join(", ")})` : ""}${i.filter ? ` WHERE ${i.filter}` : ""}`]));
     const ai = indexes(a), bi = indexes(b);
     for (const index of [...new Set([...ai.keys(), ...bi.keys()])].sort()) {
       if (ai.get(index) !== bi.get(index)) add({ kind: "index", object: index, status: !ai.has(index) ? "remove" : !bi.has(index) ? "add" : "change", source: ai.get(index) ?? "—", target: bi.get(index) ?? "—" });

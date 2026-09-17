@@ -78,7 +78,7 @@ func (s *Server) startImport(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if engine.AdditionalEngine(connection.Engine) && connection.Engine != "cassandra" {
+	if !engine.EngineCapabilities(connection.Engine).CSVImport {
 		writeError(w, 400, "UNSUPPORTED", "CSV import is not available for this engine yet")
 		return
 	}
@@ -150,6 +150,10 @@ func (s *Server) runImport(w http.ResponseWriter, r *http.Request) {
 	defer s.holdAwake()()
 	connection, ok := s.authorizedConnection(w, r)
 	if !ok {
+		return
+	}
+	if !engine.EngineCapabilities(connection.Engine).CSVImport {
+		writeError(w, 400, "UNSUPPORTED", "CSV import is not available for this engine yet")
 		return
 	}
 	item, ok := s.upload(r)
@@ -446,6 +450,11 @@ func (s *Server) runCassandraImport(w http.ResponseWriter, r *http.Request, conn
 
 // importColumnTypesSQL lists the data type of each column of the target table.
 func importColumnTypesSQL(engineName, schema, table string) string {
+	if strings.ToLower(engineName) == "sqlite" {
+		// SQLite has no information_schema; pragma_table_info is the
+		// table-valued-function equivalent and needs no schema qualifier.
+		return "SELECT name, type FROM pragma_table_info(" + importLiteral(engineName, table) + ")"
+	}
 	schemaSQL := "current_schema()"
 	switch strings.ToLower(engineName) {
 	case "mysql", "mariadb":

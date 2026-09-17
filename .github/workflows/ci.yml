@@ -1,8 +1,10 @@
 name: CI
 
-# Run on demand (Actions → CI → Run workflow); releases run only for tags.
 on:
   workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main]
 
 jobs:
   test:
@@ -33,3 +35,160 @@ jobs:
       - name: Windows build compiles
         working-directory: rowset-core
         run: GOOS=windows GOARCH=amd64 go build -o /dev/null ./cmd/rowset
+
+  live-engines:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - engine: redis
+            image: redis:7
+            port: 6379
+            test: TestLiveRedis
+          - engine: cassandra
+            image: cassandra:5
+            port: 9042
+            test: TestLiveCassandra
+          - engine: cockroachdb
+            image: cockroachdb/cockroach:latest-v24.1
+            port: 26257
+            test: TestLiveCockroachDB
+          - engine: elasticsearch
+            image: docker.elastic.co/elasticsearch/elasticsearch:8.15.0
+            port: 9200
+            test: TestLiveElasticsearch
+          - engine: clickhouse
+            image: clickhouse/clickhouse-server:25.8
+            port: 59000
+            native_port: 9000
+            test: TestLiveAdditionalServers/clickhouse
+          - engine: mongodb
+            image: mongo:8.0
+            port: 57017
+            native_port: 27017
+            test: TestLiveAdditionalServers/mongodb
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: rowset-core/go.mod
+          cache-dependency-path: |
+            rowset-core/go.sum
+            rowset-parser/go.sum
+      - name: Start isolated database
+        env:
+          DB_ENGINE: ${{ matrix.engine }}
+          DB_IMAGE: ${{ matrix.image }}
+          DB_PORT: ${{ matrix.port }}
+          NATIVE_PORT: ${{ matrix.native_port }}
+        run: |
+          case "$DB_ENGINE" in
+            cockroachdb) docker run -d --name rowset-live -p "$DB_PORT:$DB_PORT" --entrypoint /cockroach/cockroach "$DB_IMAGE" start-single-node --insecure --listen-addr=0.0.0.0:26257 ;;
+            cassandra) docker run -d --name rowset-live -p "$DB_PORT:$DB_PORT" -e MAX_HEAP_SIZE=512M -e HEAP_NEWSIZE=100M "$DB_IMAGE" ;;
+            elasticsearch) docker run -d --name rowset-live -p "$DB_PORT:$DB_PORT" -e discovery.type=single-node -e xpack.security.enabled=false -e ES_JAVA_OPTS='-Xms512m -Xmx512m' "$DB_IMAGE" ;;
+            clickhouse) docker run -d --name rowset-live -p "$DB_PORT:$NATIVE_PORT" -e CLICKHOUSE_DB=default -e CLICKHOUSE_PASSWORD=RowsetCI2026Pass "$DB_IMAGE" ;;
+            mongodb) docker run -d --name rowset-live -p "$DB_PORT:$NATIVE_PORT" "$DB_IMAGE" ;;
+            *) docker run -d --name rowset-live -p "$DB_PORT:$DB_PORT" "$DB_IMAGE" ;;
+          esac
+      - name: Wait for database native port
+        env:
+          DB_PORT: ${{ matrix.port }}
+        run: |
+          for _ in $(seq 1 120); do
+            if timeout 1 bash -c "echo > /dev/tcp/127.0.0.1/$DB_PORT" 2>/dev/null; then exit 0; fi
+            sleep 2
+          done
+          docker logs rowset-live || true
+          exit 1
+      - name: Run live engine test
+        working-directory: rowset-core
+        env:
+          ROWSET_TEST_REDIS_HOST: ${{ matrix.engine == 'redis' && '127.0.0.1' || '' }}
+          ROWSET_TEST_CASSANDRA_HOST: ${{ matrix.engine == 'cassandra' && '127.0.0.1' || '' }}
+          ROWSET_TEST_COCKROACHDB_HOST: ${{ matrix.engine == 'cockroachdb' && '127.0.0.1' || '' }}
+          ROWSET_TEST_ELASTICSEARCH_HOST: ${{ matrix.engine == 'elasticsearch' && '127.0.0.1' || '' }}
+          ROWSET_TEST_CLICKHOUSE_HOST: ${{ matrix.engine == 'clickhouse' && '127.0.0.1' || '' }}
+          ROWSET_TEST_CLICKHOUSE_PASSWORD: ${{ matrix.engine == 'clickhouse' && 'RowsetCI2026Pass' || '' }}
+          ROWSET_TEST_MONGODB_HOST: ${{ matrix.engine == 'mongodb' && '127.0.0.1' || '' }}
+          ROWSET_MATRIX_CLICKHOUSE_PORT: ${{ matrix.engine == 'clickhouse' && '59000' || '' }}
+          ROWSET_MATRIX_MONGODB_PORT: ${{ matrix.engine == 'mongodb' && '57017' || '' }}
+          LIVE_TEST: ${{ matrix.test }}
+        run: |
+          set -o pipefail
+          go test ./internal/engine -run "^${LIVE_TEST}$" -count=1 -timeout=10m -v | tee /tmp/rowset-live-engine-test.log
+          grep -q -- "--- PASS: ${LIVE_TEST} " /tmp/rowset-live-engine-test.log
+
+  live-sql:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - engine: postgres
+            image: postgres:16
+            port: 55432
+            native_port: 5432
+          - engine: mysql
+            image: mysql:8.4
+            port: 53306
+            native_port: 3306
+          - engine: mariadb
+            image: mariadb:11
+            port: 53307
+            native_port: 3306
+          - engine: mssql
+            image: mcr.microsoft.com/mssql/server:2022-latest
+            port: 51433
+            native_port: 1433
+    env:
+      DB_PASSWORD: RowsetCI2026!Pass
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: rowset-core/go.mod
+          cache-dependency-path: |
+            rowset-core/go.sum
+            rowset-parser/go.sum
+      - name: Start isolated SQL server
+        env:
+          DB_ENGINE: ${{ matrix.engine }}
+          DB_IMAGE: ${{ matrix.image }}
+          DB_PORT: ${{ matrix.port }}
+          NATIVE_PORT: ${{ matrix.native_port }}
+        run: |
+          case "$DB_ENGINE" in
+            postgres) docker run -d --name rowset-live-sql -p "$DB_PORT:$NATIVE_PORT" -e POSTGRES_PASSWORD="$DB_PASSWORD" -e POSTGRES_DB=rowset_e2e "$DB_IMAGE" ;;
+            mysql) docker run -d --name rowset-live-sql -p "$DB_PORT:$NATIVE_PORT" -e MYSQL_ROOT_PASSWORD="$DB_PASSWORD" -e MYSQL_DATABASE=rowset_e2e "$DB_IMAGE" ;;
+            mariadb) docker run -d --name rowset-live-sql -p "$DB_PORT:$NATIVE_PORT" -e MARIADB_ROOT_PASSWORD="$DB_PASSWORD" -e MARIADB_DATABASE=rowset_e2e "$DB_IMAGE" ;;
+            mssql) docker run -d --name rowset-live-sql -p "$DB_PORT:$NATIVE_PORT" -e ACCEPT_EULA=Y -e MSSQL_SA_PASSWORD="$DB_PASSWORD" "$DB_IMAGE" ;;
+          esac
+      - name: Wait for SQL server and create SQL Server test database
+        env:
+          DB_ENGINE: ${{ matrix.engine }}
+        run: |
+          for _ in $(seq 1 120); do
+            case "$DB_ENGINE" in
+              postgres) docker exec -e PGPASSWORD="$DB_PASSWORD" rowset-live-sql psql -U postgres -d rowset_e2e -Atqc 'SELECT 1' && exit 0 ;;
+              mysql) docker exec rowset-live-sql mysql -uroot "-p$DB_PASSWORD" -D rowset_e2e -Nse 'SELECT 1' && exit 0 ;;
+              mariadb) docker exec rowset-live-sql mariadb -uroot "-p$DB_PASSWORD" -D rowset_e2e -Nse 'SELECT 1' && exit 0 ;;
+              mssql) docker exec rowset-live-sql /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$DB_PASSWORD" -C -Q "IF DB_ID('rowset_e2e') IS NULL CREATE DATABASE rowset_e2e" && exit 0 ;;
+            esac
+            sleep 2
+          done
+          docker logs --tail 100 rowset-live-sql
+          exit 1
+      - name: Run live SQL plans and transaction tests
+        working-directory: rowset-core
+        env:
+          ROWSET_MATRIX_POSTGRES_PASSWORD: ${{ matrix.engine == 'postgres' && 'RowsetCI2026!Pass' || '' }}
+          ROWSET_MATRIX_MYSQL_PASSWORD: ${{ matrix.engine == 'mysql' && 'RowsetCI2026!Pass' || '' }}
+          ROWSET_MATRIX_MARIADB_PASSWORD: ${{ matrix.engine == 'mariadb' && 'RowsetCI2026!Pass' || '' }}
+          ROWSET_MATRIX_MSSQL_PASSWORD: ${{ matrix.engine == 'mssql' && 'RowsetCI2026!Pass' || '' }}
+          DB_ENGINE: ${{ matrix.engine }}
+        run: |
+          set -o pipefail
+          go test ./internal/engine -run '^(TestLiveExplainReturnsReadablePlans|TestLivePinnedSessionsCommitAndRollbackAcrossEngines)$' -count=1 -timeout=10m -v | tee /tmp/rowset-live-sql-test.log
+          grep -q -- "--- PASS: TestLiveExplainReturnsReadablePlans/$DB_ENGINE " /tmp/rowset-live-sql-test.log
+          grep -q -- "--- PASS: TestLivePinnedSessionsCommitAndRollbackAcrossEngines/$DB_ENGINE " /tmp/rowset-live-sql-test.log

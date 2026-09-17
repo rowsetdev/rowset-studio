@@ -43,12 +43,13 @@ func (s *Server) exportTable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	input.Table, input.Schema, input.Database, input.SQL = strings.TrimSpace(input.Table), strings.TrimSpace(input.Schema), strings.TrimSpace(input.Database), strings.TrimSpace(input.SQL)
-	if (input.Table == "" && input.SQL == "") || (input.Format != "csv" && input.Format != "json" && input.Format != "sql") {
-		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "a table or a SELECT, and a csv, json or sql format, are required")
+	if (input.Table == "" && input.SQL == "") || (input.Format != "csv" && input.Format != "json" && input.Format != "sql" && input.Format != "cql") {
+		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "a table or a SELECT, and a csv, json, sql or cql format, are required")
 		return
 	}
-	if input.Format == "sql" && engine.AdditionalEngine(connection.Engine) {
-		writeError(w, 400, "UNSUPPORTED", "SQL export is not available for this engine yet; use CSV or JSON")
+	capabilities := engine.EngineCapabilities(connection.Engine)
+	if input.Format == "sql" && !capabilities.SQLExport || input.Format == "cql" && !capabilities.CQLExport || input.Format == "csv" && !capabilities.CSVExport || input.Format == "json" && !capabilities.JSONExport {
+		writeError(w, 400, "UNSUPPORTED", strings.ToUpper(input.Format)+" export is not available for this engine")
 		return
 	}
 	identity := identityFromContext(r.Context())
@@ -129,10 +130,22 @@ func (s *Server) exportCassandra(w http.ResponseWriter, r *http.Request, connect
 	if keyspace == "" {
 		keyspace = connection.Database
 	}
+	if keyspace == "" {
+		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "a keyspace is required for Cassandra export")
+		return
+	}
+	if input.Format == "cql" && (input.Table == "" || input.SQL != "") {
+		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "CQL INSERT export requires a base table")
+		return
+	}
 	quote := func(value string) string { return `"` + strings.ReplaceAll(value, `"`, `""`) + `"` }
 	query, name := input.SQL, "query-result"
 	if query == "" {
-		query, name = "SELECT * FROM "+quote(keyspace)+"."+quote(input.Table), fileSlug(input.Table)
+		selectClause := "SELECT * FROM "
+		if input.Format == "cql" {
+			selectClause = "SELECT JSON * FROM "
+		}
+		query, name = selectClause+quote(keyspace)+"."+quote(input.Table), fileSlug(input.Table)
 	}
 	info, err := sqlguard.ParseCQL(query)
 	if err != nil || info.Kind != sqlguard.Select {
@@ -160,6 +173,16 @@ func (s *Server) exportCassandra(w http.ResponseWriter, r *http.Request, connect
 	}
 	ctx, cancel := withConnectionTimeout(r, connection, timeout, 30*time.Minute)
 	defer cancel()
+	if input.Format == "cql" {
+		if err := s.engines.ValidateCassandraCQLExport(ctx, target, keyspace, input.Table); err != nil {
+			if errors.Is(err, engine.ErrCQLExportUnsupported) {
+				writeError(w, http.StatusBadRequest, "UNSUPPORTED", err.Error())
+			} else {
+				writeError(w, http.StatusBadGateway, "EXEC_ERROR", err.Error())
+			}
+			return
+		}
+	}
 	result, err := s.engines.CassandraQuery(ctx, target, engine.CassandraQueryInput{Keyspace: keyspace, Query: query, Limit: limit})
 	if err != nil {
 		writeError(w, 502, "EXEC_ERROR", err.Error())
@@ -188,8 +211,13 @@ func (s *Server) exportCassandra(w http.ResponseWriter, r *http.Request, connect
 			_ = writer.Write(values)
 		}
 		writer.Flush()
+	case "cql":
+		if err := writeCassandraCQL(&output, keyspace, input.Table, result.Rows, result.Truncated); err != nil {
+			writeError(w, http.StatusBadGateway, "EXEC_ERROR", err.Error())
+			return
+		}
 	}
-	contentType := map[string]string{"csv": "text/csv; charset=utf-8", "json": "application/json", "sql": "application/sql"}[input.Format]
+	contentType := map[string]string{"csv": "text/csv; charset=utf-8", "json": "application/json", "cql": "text/plain; charset=utf-8"}[input.Format]
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.%s"`, name, input.Format))
 	w.Header().Set("X-Rowset-Rows", fmt.Sprint(len(result.Rows)))
@@ -197,4 +225,33 @@ func (s *Server) exportCassandra(w http.ResponseWriter, r *http.Request, connect
 		w.Header().Set("X-Rowset-Truncated", "true")
 	}
 	_, _ = w.Write(output.Bytes())
+}
+
+// SELECT JSON produces Cassandra's own type-correct representation, including
+// blobs, UUIDs, collections and UDTs. Reusing it in INSERT JSON avoids guessing
+// a CQL literal from the JSON-safe values returned to the editor.
+func writeCassandraCQL(out *bytes.Buffer, keyspace, table string, rows [][]any, truncated bool) error {
+	quote := func(value string) string { return `"` + strings.ReplaceAll(value, `"`, `""`) + `"` }
+	target := quote(keyspace) + "." + quote(table)
+	var body bytes.Buffer
+	for index, row := range rows {
+		if len(row) != 1 {
+			return fmt.Errorf("Cassandra returned %d columns for JSON row %d", len(row), index+1)
+		}
+		value, ok := row[0].(string)
+		if !ok {
+			return fmt.Errorf("Cassandra returned a non-text JSON row %d", index+1)
+		}
+		var object map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(value), &object); err != nil || object == nil {
+			return fmt.Errorf("Cassandra returned invalid JSON for row %d", index+1)
+		}
+		fmt.Fprintf(&body, "INSERT INTO %s JSON '%s' DEFAULT UNSET;\n", target, strings.ReplaceAll(value, "'", "''"))
+	}
+	out.WriteString("-- Cassandra CQL INSERT JSON export. TTL and write timestamps are not preserved.\n")
+	if truncated {
+		out.WriteString("-- Truncated at the configured row limit; this is not a complete table backup.\n")
+	}
+	_, _ = body.WriteTo(out)
+	return nil
 }

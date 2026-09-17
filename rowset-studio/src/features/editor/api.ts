@@ -39,6 +39,8 @@ export interface ColumnInfo {
 export interface IndexInfo {
   name: string;
   columns: string[];
+  includedColumns?: string[];
+  filter?: string;
   unique?: boolean;
   primary?: boolean;
 }
@@ -184,18 +186,53 @@ export interface PlanResult {
 
 // Returns the execution plan of one statement. analyze runs a SELECT to
 // measure actual rows and timings.
-export function explainQuery(connectionId: string, sql: string, options: { database?: string; nodeRole?: "primary" | "secondary"; analyze: boolean }) {
+export function explainQuery(connectionId: string, sql: string, options: { database?: string; nodeRole?: "primary" | "secondary"; analyze: boolean; signal?: AbortSignal }) {
   return api<PlanResult>(`/connections/${connectionId}/explain`, {
     method: "POST",
+    signal: options.signal,
     body: JSON.stringify({ sql, database: options.database ?? "", nodeRole: options.nodeRole, analyze: options.analyze }),
   });
 }
 
 // Downloads a whole table, or the full result of one SELECT; the server
 // applies policies as for any SELECT.
-export async function exportTable(connectionId: string, request: { database?: string; schema?: string; table?: string; sql?: string; format: "csv" | "json" | "sql" }) {
+export async function exportTable(connectionId: string, request: { database?: string; schema?: string; table?: string; sql?: string; format: "csv" | "json" | "sql" | "cql" }) {
   const response = await apiResponse(`/connections/${connectionId}/export`, { method: "POST", body: JSON.stringify({ ...request, database: request.database ?? "" }) });
   return response.blob();
+}
+
+// Document/key writes: MongoDB, Redis/Valkey and Elasticsearch have no SQL,
+// so these mirror the grid's UPDATE/DELETE actions with their own shape.
+export function mongoInsert(connectionId: string, request: { database?: string; collection: string; document: unknown }) {
+  return api<{ id: string; durationMs: number }>(`/connections/${connectionId}/documents/insert`, { method: "POST", body: JSON.stringify(request) });
+}
+
+export function mongoUpdate(connectionId: string, request: { database?: string; collection: string; filter: unknown; update: unknown }) {
+  return api<{ matchedCount: number; modifiedCount: number; durationMs: number }>(`/connections/${connectionId}/documents/update`, { method: "POST", body: JSON.stringify(request) });
+}
+
+export function mongoDelete(connectionId: string, request: { database?: string; collection: string; filter: unknown }) {
+  return api<{ deletedCount: number; durationMs: number }>(`/connections/${connectionId}/documents/delete`, { method: "POST", body: JSON.stringify(request) });
+}
+
+export function redisWrite(connectionId: string, request: { database?: string; key: string; type: "string" | "hash"; field?: string; value: string; ttlSeconds?: number }) {
+  return api<{ durationMs: number }>(`/connections/${connectionId}/redis/write`, { method: "POST", body: JSON.stringify(request) });
+}
+
+export function redisDelete(connectionId: string, request: { database?: string; key: string }) {
+  return api<{ deletedCount: number; durationMs: number }>(`/connections/${connectionId}/redis/delete`, { method: "POST", body: JSON.stringify(request) });
+}
+
+export function elasticsearchIndex(connectionId: string, request: { index: string; id: string; document: unknown }) {
+  return api<{ id: string; durationMs: number }>(`/connections/${connectionId}/elasticsearch/index`, { method: "POST", body: JSON.stringify(request) });
+}
+
+export function elasticsearchUpdate(connectionId: string, request: { index: string; id: string; doc: unknown }) {
+  return api<{ durationMs: number }>(`/connections/${connectionId}/elasticsearch/update`, { method: "POST", body: JSON.stringify(request) });
+}
+
+export function elasticsearchDelete(connectionId: string, request: { index: string; id: string }) {
+  return api<{ durationMs: number }>(`/connections/${connectionId}/elasticsearch/delete`, { method: "POST", body: JSON.stringify(request) });
 }
 
 // The statement that creates an object, for the schema browser's Show DDL.

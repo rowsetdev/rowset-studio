@@ -1,12 +1,14 @@
 {
   "name": "rowset-studio",
   "private": true,
-  "version": "0.0.86",
+  "version": "0.0.87",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "test": "node --experimental-strip-types --test src/features/editor/*.test.mjs src/features/notifications/*.test.mjs src/features/connections/*.test.mjs src/features/notebooks/*.test.mjs src/features/schedules/*.test.mjs",
+    "test:e2e": "node e2e/desktop.mjs",
+    "test:e2e:postgres": "node e2e/postgres.mjs",
     "audit:prod": "node scripts/audit-production.mjs",
     "preview": "vite preview",
     "lint": "eslint ."
@@ -28,6 +30,7 @@
     "autoprefixer": "^10.4.0",
     "eslint": "^10.6.0",
     "globals": "^17.7.0",
+    "playwright-core": "^1.55.1",
     "postcss": "^8.4.0",
     "tailwindcss": "^3.4.0",
     "typescript": "^5.7.0",

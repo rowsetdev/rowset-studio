@@ -139,14 +139,14 @@ func (s *Server) Handler() http.Handler {
 		if s.config.Shared {
 			mode = "shared"
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"mode": mode, "desktop": s.config.LocalLauncherKey != "", "duckdb": engine.DuckDBAvailable})
+		writeJSON(w, http.StatusOK, map[string]any{"mode": mode, "desktop": s.config.LocalLauncherKey != "", "duckdb": engine.DuckDBAvailable, "engineCapabilities": engine.AllEngineCapabilities()})
 	})
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 	mux.HandleFunc("GET /readyz", s.ready)
 	mux.HandleFunc("GET /api/meta/engines", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{"engines": []string{"postgres", "mysql", "mariadb", "mssql"}})
+		writeJSON(w, http.StatusOK, map[string]any{"engines": []string{"postgres", "mysql", "mariadb", "mssql"}, "capabilities": engine.AllEngineCapabilities()})
 	})
 	mux.HandleFunc("POST /api/auth/login", s.login)
 	mux.HandleFunc("POST /api/auth/refresh", s.refresh)
@@ -164,9 +164,17 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/connections/{id}/ddl", s.authenticated(http.HandlerFunc(s.objectDDL)))
 	mux.Handle("GET /api/connections/{id}/databases", s.authenticated(http.HandlerFunc(s.listDatabases)))
 	mux.Handle("POST /api/connections/{id}/documents/find", s.authenticated(http.HandlerFunc(s.mongoFind)))
+	mux.Handle("POST /api/connections/{id}/documents/insert", s.authenticated(http.HandlerFunc(s.mongoInsert)))
+	mux.Handle("POST /api/connections/{id}/documents/update", s.authenticated(http.HandlerFunc(s.mongoUpdate)))
+	mux.Handle("POST /api/connections/{id}/documents/delete", s.authenticated(http.HandlerFunc(s.mongoDelete)))
 	mux.Handle("POST /api/connections/{id}/redis/scan", s.authenticated(http.HandlerFunc(s.redisScan)))
+	mux.Handle("POST /api/connections/{id}/redis/write", s.authenticated(http.HandlerFunc(s.redisWrite)))
+	mux.Handle("POST /api/connections/{id}/redis/delete", s.authenticated(http.HandlerFunc(s.redisDelete)))
 	mux.Handle("POST /api/connections/{id}/cassandra/query", s.authenticated(http.HandlerFunc(s.cassandraQuery)))
 	mux.Handle("POST /api/connections/{id}/elasticsearch/search", s.authenticated(http.HandlerFunc(s.elasticsearchSearch)))
+	mux.Handle("POST /api/connections/{id}/elasticsearch/index", s.authenticated(http.HandlerFunc(s.elasticsearchIndex)))
+	mux.Handle("POST /api/connections/{id}/elasticsearch/update", s.authenticated(http.HandlerFunc(s.elasticsearchUpdate)))
+	mux.Handle("POST /api/connections/{id}/elasticsearch/delete", s.authenticated(http.HandlerFunc(s.elasticsearchDelete)))
 	mux.Handle("POST /api/connections/{id}/query", s.authenticated(http.HandlerFunc(s.runQuery)))
 	mux.Handle("POST /api/multirun", s.authenticated(http.HandlerFunc(s.runOnConnections)))
 	mux.Handle("POST /api/connections/{id}/explain", s.authenticated(http.HandlerFunc(s.explainQuery)))

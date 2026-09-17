@@ -1,0 +1,184 @@
+{
+  "engine": "mariadb",
+  "status": "pass",
+  "image": "mariadb:11",
+  "mode": "disposable",
+  "tests": [
+    {
+      "test": "TestLiveAllTypes/postgres",
+      "result": "skip",
+      "elapsed": 0
+    },
+    {
+      "test": "TestLiveAllTypes/mysql",
+      "result": "skip",
+      "elapsed": 0
+    },
+    {
+      "test": "TestLiveAllTypes/mariadb/explain_and_schema",
+      "result": "pass",
+      "elapsed": 0.02
+    },
+    {
+      "test": "TestLiveAllTypes/mariadb/update_backup_and_restore_script",
+      "result": "pass",
+      "elapsed": 0.02
+    },
+    {
+      "test": "TestLiveAllTypes/mariadb/delete_backup_and_restore",
+      "result": "pass",
+      "elapsed": 0.02
+    },
+    {
+      "test": "TestLiveAllTypes/mariadb/export_and_import",
+      "result": "pass",
+      "elapsed": 0.03
+    },
+    {
+      "test": "TestLiveAllTypes/mariadb/large_table",
+      "result": "pass",
+      "elapsed": 0.14
+    },
+    {
+      "test": "TestLiveAllTypes/mariadb",
+      "result": "pass",
+      "elapsed": 0.27
+    },
+    {
+      "test": "TestLiveAllTypes/sqlserver",
+      "result": "skip",
+      "elapsed": 0
+    },
+    {
+      "test": "TestLiveAllTypes",
+      "result": "pass",
+      "elapsed": 0.29
+    },
+    {
+      "test": "TestLiveObjectDDL/postgres",
+      "result": "skip",
+      "elapsed": 0
+    },
+    {
+      "test": "TestLiveObjectDDL/mysql",
+      "result": "skip",
+      "elapsed": 0
+    },
+    {
+      "test": "TestLiveObjectDDL/mariadb",
+      "result": "pass",
+      "elapsed": 0.04
+    },
+    {
+      "test": "TestLiveObjectDDL/sqlserver",
+      "result": "skip",
+      "elapsed": 0
+    },
+    {
+      "test": "TestLiveObjectDDL",
+      "result": "pass",
+      "elapsed": 0.06
+    },
+    {
+      "test": "TestLiveTableExport/postgres",
+      "result": "skip",
+      "elapsed": 0
+    },
+    {
+      "test": "TestLiveTableExport/mysql",
+      "result": "skip",
+      "elapsed": 0
+    },
+    {
+      "test": "TestLiveTableExport/mariadb",
+      "result": "pass",
+      "elapsed": 0.04
+    },
+    {
+      "test": "TestLiveTableExport/sqlserver",
+      "result": "skip",
+      "elapsed": 0
+    },
+    {
+      "test": "TestLiveTableExport",
+      "result": "pass",
+      "elapsed": 0.04
+    },
+    {
+      "test": "TestLiveDatabaseObjects/postgres",
+      "result": "skip",
+      "elapsed": 0
+    },
+    {
+      "test": "TestLiveDatabaseObjects/mysql",
+      "result": "skip",
+      "elapsed": 0
+    },
+    {
+      "test": "TestLiveDatabaseObjects/mariadb",
+      "result": "pass",
+      "elapsed": 0.13
+    },
+    {
+      "test": "TestLiveDatabaseObjects/sqlserver",
+      "result": "skip",
+      "elapsed": 0
+    },
+    {
+      "test": "TestLiveDatabaseObjects",
+      "result": "pass",
+      "elapsed": 0.15
+    },
+    {
+      "test": "TestLiveExplainReturnsReadablePlans/postgres",
+      "result": "skip",
+      "elapsed": 0
+    },
+    {
+      "test": "TestLiveExplainReturnsReadablePlans/mysql",
+      "result": "skip",
+      "elapsed": 0
+    },
+    {
+      "test": "TestLiveExplainReturnsReadablePlans/mariadb",
+      "result": "pass",
+      "elapsed": 0.01
+    },
+    {
+      "test": "TestLiveExplainReturnsReadablePlans/mssql",
+      "result": "skip",
+      "elapsed": 0
+    },
+    {
+      "test": "TestLiveExplainReturnsReadablePlans",
+      "result": "pass",
+      "elapsed": 0.01
+    },
+    {
+      "test": "TestLivePinnedSessionsCommitAndRollbackAcrossEngines/postgres",
+      "result": "skip",
+      "elapsed": 0
+    },
+    {
+      "test": "TestLivePinnedSessionsCommitAndRollbackAcrossEngines/mysql",
+      "result": "skip",
+      "elapsed": 0
+    },
+    {
+      "test": "TestLivePinnedSessionsCommitAndRollbackAcrossEngines/mariadb",
+      "result": "pass",
+      "elapsed": 0.01
+    },
+    {
+      "test": "TestLivePinnedSessionsCommitAndRollbackAcrossEngines/mssql",
+      "result": "skip",
+      "elapsed": 0
+    },
+    {
+      "test": "TestLivePinnedSessionsCommitAndRollbackAcrossEngines",
+      "result": "pass",
+      "elapsed": 0.01
+    }
+  ],
+  "exit_code": 0
+}

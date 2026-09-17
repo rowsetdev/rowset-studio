@@ -133,6 +133,18 @@ func TestScheduledQueriesValidateAndPersist(t *testing.T) {
 	}
 }
 
+func TestScheduleRejectsEngineWithoutSQLScheduler(t *testing.T) {
+	s, identity := personalServer(t)
+	ctx := context.Background()
+	if err := s.store.CreateConnection(ctx, domain.Connection{ID: "cassandra-schedule", OrgID: identity.OrgID, Name: "Cassandra", Engine: "cassandra", Host: "127.0.0.1", Port: 9042, Database: "app", Environment: "development"}); err != nil {
+		t.Fatal(err)
+	}
+	w := scheduleRequest(t, s, identity, http.MethodPost, "", scheduleBody("cassandra-schedule", "SELECT * FROM items", t.TempDir(), nil), s.createScheduled)
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "not available for this engine") {
+		t.Fatalf("schedule accepted Cassandra: %d %s", w.Code, w.Body.String())
+	}
+}
+
 func TestMissedScheduledRunsHonourCatchUp(t *testing.T) {
 	s, identity := personalServer(t)
 	connectionID := scheduleConnection(t, s, identity)

@@ -228,6 +228,32 @@ func jsonSafe(v any) any {
 	}
 }
 
+// ErrCQLExportUnsupported identifies tables that cannot be restored with
+// Cassandra's INSERT JSON syntax (notably counter tables and views).
+var ErrCQLExportUnsupported = errors.New("CQL INSERT export is not available for this table")
+
+func (m *Manager) ValidateCassandraCQLExport(ctx context.Context, connection Connection, keyspace, table string) error {
+	session, cleanup, err := cassandraSession(ctx, connection, keyspace)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	metadata, err := session.KeyspaceMetadata(keyspace)
+	if err != nil {
+		return err
+	}
+	item := metadata.Tables[table]
+	if item == nil {
+		return fmt.Errorf("%w: %s is not a base table", ErrCQLExportUnsupported, table)
+	}
+	for _, column := range item.Columns {
+		if column.Type.Type() == gocql.TypeCounter {
+			return fmt.Errorf("%w: counter tables require UPDATE rather than INSERT", ErrCQLExportUnsupported)
+		}
+	}
+	return nil
+}
+
 func cassandraDDL(ctx context.Context, connection Connection, kind, keyspace, name string) (string, error) {
 	if kind != "table" {
 		return "", fmt.Errorf("no definition available for Cassandra %s objects", kind)

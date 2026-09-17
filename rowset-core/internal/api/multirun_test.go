@@ -94,6 +94,21 @@ func TestMultiRunReportsEachConnectionOnItsOwn(t *testing.T) {
 	}
 }
 
+func TestMultiRunRoutesCassandraToCQLHandler(t *testing.T) {
+	s, identity := personalServer(t)
+	if err := s.store.CreateConnection(context.Background(), domain.Connection{ID: "cql-target", OrgID: identity.OrgID, Name: "Cassandra", Engine: "cassandra", Host: "127.0.0.1", Port: 9042, Database: "app", Environment: "development"}); err != nil {
+		t.Fatal(err)
+	}
+	_, events := multiRunCall(t, s, identity, map[string]any{
+		"targets":    []map[string]string{{"connectionId": "cql-target", "database": "app"}},
+		"statements": []string{"USE app"},
+	})
+	event := finalEvents(events)[0]
+	if event.Status != "error" || !strings.Contains(event.Error, "session-control CQL") {
+		t.Fatalf("Cassandra statement did not use the CQL handler: %+v", event)
+	}
+}
+
 // Policies decide before any database is contacted, so this runs without one:
 // a script on several connections is refused on each, and each refusal is in
 // that connection's history, just as on a single run.

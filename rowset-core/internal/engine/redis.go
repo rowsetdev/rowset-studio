@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	goredis "github.com/redis/go-redis/v9"
 )
@@ -27,13 +28,13 @@ func redisClient(connection Connection) (*goredis.Client, error) {
 		return nil, err
 	}
 	return goredis.NewClient(&goredis.Options{
-		Addr:         net.JoinHostPort(connection.Host, fmt.Sprint(connection.Port)),
-		Username:     connection.Username,
-		Password:     connection.Password,
-		DB:           db,
-		TLSConfig:    tls,
-		DialTimeout:  10 * time.Second,
-		ReadTimeout:  24 * time.Hour,
+		Addr:        net.JoinHostPort(connection.Host, fmt.Sprint(connection.Port)),
+		Username:    connection.Username,
+		Password:    connection.Password,
+		DB:          db,
+		TLSConfig:   tls,
+		DialTimeout: 10 * time.Second,
+		ReadTimeout: 24 * time.Hour,
 	}), nil
 }
 
@@ -188,25 +189,93 @@ func (m *Manager) RedisScan(ctx context.Context, connection Connection, input Re
 	return entries, cursor, nil
 }
 
+type RedisWriteInput struct {
+	Database   string `json:"database"`
+	Key        string `json:"key"`
+	Type       string `json:"type"`  // "string" or "hash"
+	Field      string `json:"field"` // required when type is "hash"
+	Value      string `json:"value"`
+	TTLSeconds int    `json:"ttlSeconds"` // 0 leaves any existing TTL untouched for hash; string SET clears it unless positive
+}
+
+// RedisWrite sets a string value or one hash field. Only these two types are
+// supported for now; list/set/zset/stream editing is not exposed yet.
+func (m *Manager) RedisWrite(ctx context.Context, connection Connection, input RedisWriteInput) error {
+	if strings.TrimSpace(input.Key) == "" {
+		return errors.New("key is required")
+	}
+	if input.TTLSeconds < 0 {
+		return errors.New("ttlSeconds must be zero or positive")
+	}
+	client, err := redisClient(connection)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	switch input.Type {
+	case "string":
+		ttl := time.Duration(input.TTLSeconds) * time.Second
+		return client.Set(ctx, input.Key, input.Value, ttl).Err()
+	case "hash":
+		if strings.TrimSpace(input.Field) == "" {
+			return errors.New("field is required for hash writes")
+		}
+		if err := client.HSet(ctx, input.Key, input.Field, input.Value).Err(); err != nil {
+			return err
+		}
+		if input.TTLSeconds > 0 {
+			return client.Expire(ctx, input.Key, time.Duration(input.TTLSeconds)*time.Second).Err()
+		}
+		return nil
+	default:
+		return fmt.Errorf("writing a %q key is not supported yet; only string and hash are", input.Type)
+	}
+}
+
+type RedisDeleteInput struct {
+	Database string `json:"database"`
+	Key      string `json:"key"`
+}
+
+// RedisDelete removes a key regardless of its type.
+func (m *Manager) RedisDelete(ctx context.Context, connection Connection, input RedisDeleteInput) (int64, error) {
+	if strings.TrimSpace(input.Key) == "" {
+		return 0, errors.New("key is required")
+	}
+	client, err := redisClient(connection)
+	if err != nil {
+		return 0, err
+	}
+	defer client.Close()
+	return client.Del(ctx, input.Key).Result()
+}
+
 func redisPreview(ctx context.Context, client *goredis.Client, key, kind string) (json.RawMessage, error) {
 	const capItems = 100
 	switch kind {
 	case "string":
-		v, err := client.Get(ctx, key).Result()
+		v, err := client.GetRange(ctx, key, 0, 16383).Result()
 		if err != nil {
 			return nil, err
 		}
+		for len(v) > 0 && !utf8.ValidString(v) {
+			v = v[:len(v)-1]
+		}
 		if len(v) > 4096 {
-			v = v[:4096] + "…"
+			v = string([]rune(v)[:min(len([]rune(v)), 4096)]) + "…"
 		}
 		raw, _ := json.Marshal(v)
 		return raw, nil
 	case "hash":
-		v, err := client.HGetAll(ctx, key).Result()
+		v, _, err := client.HScan(ctx, key, 0, "*", capItems).Result()
 		if err != nil {
 			return nil, err
 		}
-		raw, _ := json.Marshal(v)
+		preview := make(map[string]string, min(capItems, len(v)/2))
+		for i := 0; i+1 < len(v) && len(preview) < capItems; i += 2 {
+			preview[redisPreviewText(v[i], 256)] = redisPreviewText(v[i+1], 4096)
+		}
+		raw, _ := json.Marshal(preview)
 		return raw, nil
 	case "list":
 		v, err := client.LRange(ctx, key, 0, capItems-1).Result()
@@ -239,4 +308,15 @@ func redisPreview(ctx context.Context, client *goredis.Client, key, kind string)
 	default:
 		return json.RawMessage(fmt.Sprintf("%q", "unsupported type: "+kind)), nil
 	}
+}
+
+func redisPreviewText(value string, maxBytes int) string {
+	if len(value) <= maxBytes {
+		return value
+	}
+	value = value[:maxBytes]
+	for len(value) > 0 && !utf8.ValidString(value) {
+		value = value[:len(value)-1]
+	}
+	return value + "…"
 }

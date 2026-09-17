@@ -4,6 +4,10 @@
 *.duckdb
 *.duckdb.wal
 
+# Python
+__pycache__/
+*.pyc
+
 # Node
 node_modules/
 dist/
@@ -11,6 +15,7 @@ dist/
 /rowset-core/internal/web/dist/*
 !/rowset-core/internal/web/dist/index.html
 /dists/
+/graphify-out/
 .wrangler/
 *.tsbuildinfo
 *.local

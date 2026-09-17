@@ -107,10 +107,12 @@ type Column struct {
 	Default, Generated, Comment   string
 }
 type Index struct {
-	Name    string   `json:"name"`
-	Columns []string `json:"columns"`
-	Unique  bool     `json:"unique"`
-	Primary bool     `json:"primary"`
+	Name            string   `json:"name"`
+	Columns         []string `json:"columns"`
+	IncludedColumns []string `json:"includedColumns,omitempty"`
+	Filter          string   `json:"filter,omitempty"`
+	Unique          bool     `json:"unique"`
+	Primary         bool     `json:"primary"`
 }
 type Routine struct{ Schema, Name, Kind string }
 type Sequence struct{ Schema, Name string }
@@ -126,26 +128,39 @@ type Schema struct {
 }
 
 type Manager struct {
-	mu      sync.Mutex
-	pools   map[string]*sql.DB
-	tunnels map[string]*ssh.Client
-	schemas schemaCache
+	mu       sync.Mutex
+	pools    map[string]*sql.DB
+	tunnels  map[string]*ssh.Client
+	opening  map[string]*poolOpening
+	closed   bool
+	openPool func(Connection, *ssh.Client) (*sql.DB, error)
+	schemas  schemaCache
+}
+
+type poolOpening struct {
+	ready chan struct{}
+	db    *sql.DB
+	err   error
 }
 
 func NewManager() *Manager {
-	return &Manager{pools: make(map[string]*sql.DB), tunnels: make(map[string]*ssh.Client)}
+	return &Manager{pools: make(map[string]*sql.DB), tunnels: make(map[string]*ssh.Client), opening: make(map[string]*poolOpening)}
 }
 func (m *Manager) Close() error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	var joined error
-	for key, db := range m.pools {
-		joined = errors.Join(joined, db.Close())
-		delete(m.pools, key)
+	m.closed = true
+	for key := range m.opening {
+		delete(m.opening, key)
 	}
-	for key, tunnel := range m.tunnels {
+	pools, tunnels := m.pools, m.tunnels
+	m.pools, m.tunnels = make(map[string]*sql.DB), make(map[string]*ssh.Client)
+	m.mu.Unlock()
+	var joined error
+	for _, db := range pools {
+		joined = errors.Join(joined, db.Close())
+	}
+	for _, tunnel := range tunnels {
 		joined = errors.Join(joined, tunnel.Close())
-		delete(m.tunnels, key)
 	}
 	return joined
 }
@@ -158,20 +173,33 @@ func (m *Manager) Invalidate(connectionID string) error {
 	}
 	m.InvalidateSchema(connectionID)
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	var joined error
 	prefix := connectionID + "|"
+	var pools []*sql.DB
+	var tunnels []*ssh.Client
 	for key, db := range m.pools {
 		if strings.HasPrefix(key, prefix) {
-			joined = errors.Join(joined, db.Close())
+			pools = append(pools, db)
 			delete(m.pools, key)
 		}
 	}
 	for key, tunnel := range m.tunnels {
 		if strings.HasPrefix(key, prefix) {
-			joined = errors.Join(joined, tunnel.Close())
+			tunnels = append(tunnels, tunnel)
 			delete(m.tunnels, key)
 		}
+	}
+	for key := range m.opening {
+		if strings.HasPrefix(key, prefix) {
+			delete(m.opening, key)
+		}
+	}
+	m.mu.Unlock()
+	var joined error
+	for _, db := range pools {
+		joined = errors.Join(joined, db.Close())
+	}
+	for _, tunnel := range tunnels {
+		joined = errors.Join(joined, tunnel.Close())
 	}
 	return joined
 }
@@ -867,39 +895,76 @@ func (m *Manager) TestTunnel(ctx context.Context, connection Connection) (string
 func (m *Manager) database(connection Connection) (*sql.DB, error) {
 	key := poolKey(connection)
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	if m.closed {
+		m.mu.Unlock()
+		return nil, errors.New("database manager is closed")
+	}
 	if db := m.pools[key]; db != nil {
+		m.mu.Unlock()
 		return db, nil
 	}
+	if pending := m.opening[key]; pending != nil {
+		m.mu.Unlock()
+		<-pending.ready
+		return pending.db, pending.err
+	}
+	pending := &poolOpening{ready: make(chan struct{})}
+	m.opening[key] = pending
+	m.mu.Unlock()
 	var tunnel *ssh.Client
+	var db *sql.DB
+	var err error
 	if connection.SSH.enabled() {
-		var err error
-		if tunnel, err = dialSSH(context.Background(), connection.SSH, nil); err != nil {
-			return nil, err
+		tunnel, err = dialSSH(context.Background(), connection.SSH, nil)
+	}
+	if err == nil {
+		open := m.openPool
+		if open == nil {
+			open = openDatabase
+		}
+		db, err = open(connection, tunnel)
+	}
+	if err == nil {
+		poolSize := connection.PoolSize
+		if poolSize <= 0 {
+			poolSize = 10
+		}
+		if FileEngine(connection.Engine) {
+			poolSize = 1
+		}
+		db.SetMaxOpenConns(poolSize)
+		db.SetMaxIdleConns(poolSize)
+		db.SetConnMaxIdleTime(30 * time.Minute)
+		db.SetConnMaxLifetime(2 * time.Hour)
+	}
+	m.mu.Lock()
+	if m.closed || m.opening[key] != pending {
+		err = errors.New("database connection was invalidated during setup")
+	} else if err == nil {
+		m.pools[key] = db
+		if tunnel != nil {
+			m.tunnels[key] = tunnel
 		}
 	}
-	db, err := openDatabase(connection, tunnel)
+	if m.opening[key] == pending {
+		delete(m.opening, key)
+	}
+	if err == nil {
+		pending.db = db
+	} else {
+		pending.err = err
+	}
+	close(pending.ready)
+	m.mu.Unlock()
 	if err != nil {
+		if db != nil {
+			_ = db.Close()
+		}
 		if tunnel != nil {
 			_ = tunnel.Close()
 		}
 		return nil, err
 	}
-	if tunnel != nil {
-		m.tunnels[key] = tunnel
-	}
-	poolSize := connection.PoolSize
-	if poolSize <= 0 {
-		poolSize = 10
-	}
-	if FileEngine(connection.Engine) {
-		poolSize = 1
-	}
-	db.SetMaxOpenConns(poolSize)
-	db.SetMaxIdleConns(poolSize)
-	db.SetConnMaxIdleTime(30 * time.Minute)
-	db.SetConnMaxLifetime(2 * time.Hour)
-	m.pools[key] = db
 	return db, nil
 }
 

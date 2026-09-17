@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"reflect"
 	"strconv"
@@ -86,7 +87,11 @@ func TestLiveRedis(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer client.Close()
-	client.FlushDB(ctx)
+	for _, key := range []string{"rowset:probe:string", "rowset:probe:hash", "rowset:probe:list", "rowset:probe:set", "rowset:probe:zset"} {
+		if err := client.Del(ctx, key).Err(); err != nil {
+			t.Fatal(err)
+		}
+	}
 	client.Set(ctx, "rowset:probe:string", "hello", 0)
 	client.Expire(ctx, "rowset:probe:string", time.Hour)
 	client.HSet(ctx, "rowset:probe:hash", "field", "value")
@@ -215,6 +220,27 @@ func TestLiveCassandra(t *testing.T) {
 	ddl, err := cassandraDDL(ctx, c, "table", "rowset_probe", "items")
 	if err != nil || !strings.Contains(ddl, "CREATE TABLE") || !strings.Contains(ddl, "PRIMARY KEY") {
 		t.Fatalf("ddl: %q err=%v", ddl, err)
+	}
+	if err := manager.ValidateCassandraCQLExport(ctx, c, "rowset_probe", "items"); err != nil {
+		t.Fatalf("CQL export validation: %v", err)
+	}
+	jsonRows, err := manager.CassandraQuery(ctx, c, CassandraQueryInput{Keyspace: "rowset_probe", Query: `SELECT JSON * FROM "rowset_probe"."items" WHERE id=1`, Limit: 10})
+	if err != nil || len(jsonRows.Rows) != 1 || len(jsonRows.Rows[0]) != 1 {
+		t.Fatalf("SELECT JSON: %#v err=%v", jsonRows, err)
+	}
+	jsonRow, ok := jsonRows.Rows[0][0].(string)
+	if !ok {
+		t.Fatalf("SELECT JSON returned %T", jsonRows.Rows[0][0])
+	}
+	insertJSON := `INSERT INTO "rowset_probe"."items" JSON '` + strings.ReplaceAll(jsonRow, "'", "''") + `' DEFAULT UNSET`
+	if _, err := manager.CassandraQuery(ctx, c, CassandraQueryInput{Keyspace: "rowset_probe", Query: insertJSON, Limit: 10}); err != nil {
+		t.Fatalf("replaying SELECT JSON as INSERT JSON: %v", err)
+	}
+	if _, err := manager.CassandraQuery(ctx, c, CassandraQueryInput{Keyspace: "rowset_probe", Query: "CREATE TABLE IF NOT EXISTS counter_probe (id int PRIMARY KEY, total counter)", Limit: 10}); err != nil {
+		t.Fatalf("creating counter table: %v", err)
+	}
+	if err := manager.ValidateCassandraCQLExport(ctx, c, "rowset_probe", "counter_probe"); !errors.Is(err, ErrCQLExportUnsupported) {
+		t.Fatalf("counter table should reject INSERT export: %v", err)
 	}
 }
 

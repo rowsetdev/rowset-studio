@@ -106,11 +106,15 @@ func TestLiveAdditionalServers(t *testing.T) {
 				t.Skip("additional test server not configured")
 			}
 			c := Connection{ID: kind, Engine: kind, Host: host, Port: 59000, Database: "default", Username: "default", TLS: TLSSettings{Mode: TLSDisable}}
+			if kind == "clickhouse" {
+				c.Password = os.Getenv("ROWSET_TEST_CLICKHOUSE_PASSWORD")
+			}
 			if kind == "mongodb" {
 				c.Port = 57017
 				c.Database = "rowset_test"
 				c.Username = ""
 			}
+			c.Port = liveSQLPort(t, kind, c.Port)
 			m := NewManager()
 			defer m.Close()
 			if err := m.Test(ctx, c); err != nil {

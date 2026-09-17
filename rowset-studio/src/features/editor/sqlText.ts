@@ -86,13 +86,14 @@ export function splitStatements(sql: string, engine?: string): { sql: string; st
   // Within a routine body, BEGIN/CASE open a block and END closes it; END IF,
   // END LOOP and the like close their own statements, and BEGIN TRAN starts
   // no block.
-  let routine: boolean | null = null, depth = 0;
+  let routine: boolean | null = null, depth = 0, cqlBatch = false;
   const add = (end: number) => {
     const part = sql.slice(start, end);
     if (sqlTokens(part, { hashComments: hash }).some((t) => t.kind !== "space" && t.kind !== "comment" && t.text !== ";")) result.push({ sql: part.trim(), start, end });
     start = end;
     routine = null;
     depth = 0;
+    cqlBatch = false;
   };
   const nextWord = (index: number) => {
     for (let next = index + 1; next < tokens.length; next++) {
@@ -102,13 +103,16 @@ export function splitStatements(sql: string, engine?: string): { sql: string; st
     return "";
   };
   tokens.forEach((t, index) => {
-    if (routine === null && t.kind !== "space" && t.kind !== "comment" && t.text !== ";") routine = ROUTINE_START.test(sql.slice(t.start, t.start + 500));
+    if (routine === null && t.kind !== "space" && t.kind !== "comment" && t.text !== ";") {
+      routine = ROUTINE_START.test(sql.slice(t.start, t.start + 500));
+      cqlBatch = engine?.toLowerCase() === "cassandra" && /^BEGIN\s+(?:(?:UNLOGGED|COUNTER)\s+)?BATCH\b/i.test(sql.slice(t.start));
+    }
     if (routine && t.kind === "word") {
       const word = t.text.toUpperCase();
       if (word === "CASE" || (word === "BEGIN" && !["TRAN", "TRANSACTION", "DISTRIBUTED", "WORK"].includes(nextWord(index)))) depth++;
       else if (word === "END" && !["IF", "LOOP", "WHILE", "REPEAT"].includes(nextWord(index))) depth = Math.max(0, depth - 1);
     }
-    if (t.kind === "symbol" && t.text === ";" && (!routine || depth === 0)) add(t.end);
+    if (t.kind === "symbol" && t.text === ";" && (!routine || depth === 0) && (!cqlBatch || /\bAPPLY\s+BATCH\s*;$/i.test(sql.slice(start, t.end)))) add(t.end);
   });
   add(sql.length);
   return result;

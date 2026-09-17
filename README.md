@@ -38,20 +38,19 @@ encrypted in a local SQLite database.
 | <img src="rowset-studio/src/assets/engines/postgres.png" height="18" valign="middle"> PostgreSQL | Host/port or URL, SSH tunnel | Full SQL editor, DDL, CSV import, row editing, schema compare |
 | <img src="rowset-studio/src/assets/engines/mysql.png" height="18" valign="middle"> MySQL | Host/port or URL, SSH tunnel | Full SQL editor, DDL, CSV import, row editing, schema compare |
 | <img src="rowset-studio/src/assets/engines/mariadb.png" height="18" valign="middle"> MariaDB | Host/port or URL, SSH tunnel | Full SQL editor, DDL, CSV import, row editing, schema compare |
-| <img src="rowset-studio/src/assets/engines/mssql.svg" height="18" valign="middle"> SQL Server | Host/port or URL, SSH tunnel | Full SQL editor, DDL, CSV import, row editing, schema compare |
-| <img src="rowset-studio/src/assets/engines/cockroachdb.svg" height="18" valign="middle"> CockroachDB | Host/port (PostgreSQL wire protocol) | Same as PostgreSQL |
-| <img src="rowset-studio/src/assets/engines/snowflake.svg" height="18" valign="middle"> Snowflake | Account, warehouse, role | Full SQL editor, DDL, schema browsing |
+| <img src="rowset-studio/src/assets/engines/mssql.svg" height="18" valign="middle"> SQL Server | Host/port or URL, SSH tunnel | SQL editor, DDL, CSV import, row editing, schema compare, estimated and actual plans |
+| <img src="rowset-studio/src/assets/engines/cockroachdb.svg" height="18" valign="middle"> CockroachDB | Host/port (PostgreSQL wire protocol) | SQL editor, transactions, DDL, CSV import/export, row editing; plan visualization is unavailable |
+| <img src="rowset-studio/src/assets/engines/snowflake.svg" height="18" valign="middle"> Snowflake | Account; user's default warehouse and role | SQL editor and schema browsing; DDL viewing, CSV import and plan visualization are unavailable; live account testing is pending |
 | SQLite | Absolute path to an existing file | SQL, transactions, schema, keys, indexes, DDL, CSV/JSON export |
 | DuckDB | Absolute path to an existing file; CGO build | SQL, transactions, tables/views, DDL, CSV/JSON export |
 | <img src="rowset-studio/src/assets/engines/clickhouse.svg" height="18" valign="middle"> ClickHouse | Native TCP: 9440 with TLS, 9000 without | SQL, databases, tables/views, DDL, CSV/JSON export |
 | <img src="rowset-studio/src/assets/engines/mongodb.svg" height="18" valign="middle"> MongoDB | Host/port; `authSource=admin` | Compass-style filter/project/sort/skip/limit query bar synced with `db.collection.find()`, read-only |
 | <img src="rowset-studio/src/assets/engines/redis.svg" height="18" valign="middle"> Redis | Host/port | Pattern/type scan bar, keys grouped by type as pseudo-tables |
-| <img src="rowset-studio/src/assets/engines/cassandra.svg" height="18" valign="middle"> Cassandra | Contact points, keyspace, TLS/SSH, consistency/paging | Governed CQL reads/writes/DDL/batches, schema/DDL, CSV import/export |
+| Valkey | Host/port | Redis-compatible pattern/type scan bar and key previews; writes are unavailable |
+| <img src="rowset-studio/src/assets/engines/cassandra.svg" height="18" valign="middle"> Cassandra | Contact points, keyspace, TLS/SSH, consistency/paging | Governed CQL reads/writes/DDL/batches, schema/DDL, CSV import, CSV/JSON export, CQL `INSERT JSON` export for base tables without counters |
 | <img src="rowset-studio/src/assets/engines/elasticsearch.svg" height="18" valign="middle"> Elasticsearch | HTTP API host/port | Index/query/size search bar, index mapping browsing |
 
-CockroachDB and Snowflake behave like the four original SQL engines (row
-editing, CSV import excepted for Snowflake). MongoDB, Redis and
-Elasticsearch are read-only in this release; Cassandra uses governed CQL, with a query bar tailored to
+MongoDB, Redis, Valkey and Elasticsearch are read-only in this release; Cassandra uses governed CQL, with a query bar tailored to
 each — see [Additional databases](#additional-databases-and-schema-comparison)
 below for exact limits.
 
@@ -256,10 +255,21 @@ release workflow, which tests, builds and publishes the assets.
 (cd rowset-parser && go test ./...)
 (cd rowset-core && go vet ./... && go test ./...)
 (cd rowset-studio && npm run build && npm run lint && npm test)
+GOCACHE=/tmp/rowset-build-cache sh scripts/build-local-binary.sh
+(cd rowset-studio && npm run test:e2e) # local Chrome + sqlite3 required
+(cd rowset-studio && npm run test:e2e:postgres) # local Chrome + Docker required
+node --experimental-strip-types rowset-studio/scripts/bench-grid.mjs
 ```
 
 Live engine tests run against real database servers and are skipped unless
 their credentials are set:
+
+The [14-engine client audit](reports/database-client-audit-2026-09-17.md) records
+which operations were verified live and which remain unverified. To repeat its
+container and file-engine probes one engine at a time, run
+`python3 scripts/audit/run.py all` from the repository root. Image digests are
+locked in `scripts/audit/images.lock.json`; JSON evidence is written under
+`reports/audit-evidence/`.
 
 | Engine | Variables |
 | --- | --- |
@@ -268,6 +278,13 @@ their credentials are set:
 | Redis | `ROWSET_TEST_REDIS_HOST` (+ `_PORT`) |
 | Cassandra | `ROWSET_TEST_CASSANDRA_HOST` (+ `_PORT`) |
 | Elasticsearch | `ROWSET_TEST_ELASTICSEARCH_HOST` (+ `_PORT`) |
+| ClickHouse | `ROWSET_TEST_CLICKHOUSE_HOST`, optional `ROWSET_TEST_CLICKHOUSE_PASSWORD`, `ROWSET_MATRIX_CLICKHOUSE_PORT` |
+| MongoDB | `ROWSET_TEST_MONGODB_HOST`, optional `ROWSET_MATRIX_MONGODB_PORT` |
+
+CI runs isolated live-engine jobs for these engines alongside the self-contained
+Go and Studio suites. The SQL live jobs check that each selected engine's plan
+and transaction subtests actually pass, so a skipped integration test cannot
+be mistaken for coverage.
 
 The version lives in `rowset-studio/package.json`; the build scripts stamp
 it into Studio, the executable and the macOS app. See

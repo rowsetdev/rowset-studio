@@ -1,0 +1,13 @@
+{
+  "postgres": "postgres@sha256:f1c3376c26f2609ab9f29f71f824103fe2fcd8ee0346485cb6122a4f93df6f94",
+  "mysql": "mysql@sha256:3466ba4a4828aa8d46fb7c3bc16b67b781c98413cf4ea0fac6feaa6e881faa26",
+  "mariadb": "mariadb@sha256:2d2f4095530294735a857cfe22bb101e19b0849b416911c796ec4aa81b164a62",
+  "mssql": "mcr.microsoft.com/mssql/server@sha256:97b448857967be55e005424a660056fe6d51814435804dc07e8f79f028bab5fb",
+  "cockroachdb": "cockroachdb/cockroach@sha256:fb5ae2cb62ee8162687afbdacebfa5a155a4f08389866b53d9decc23db1686da",
+  "clickhouse": "clickhouse/clickhouse-server@sha256:0152dd511befe6a2c2ef53e930726179669b08116da78500b37c51c96ff5ee77",
+  "mongodb": "mongo@sha256:4a0f30875898413139bec44c73c02a05fed172578de65b644dcdcee143ae7306",
+  "redis": "redis@sha256:71da9275c5f3fcb97d0fa0c8c5b36cc995327265420f17a04bfd544f458059f7",
+  "valkey": "valkey/valkey@sha256:dbb2de90cb7a60c4f3f7e8d73fcaab69a94c557bb08a064108fa5d5b1814086e",
+  "cassandra": "cassandra@sha256:da9dad3aaf67c4e5126c6aafa769460d75f27c1716951c48896ff5c4e97d2af3",
+  "elasticsearch": "docker.elastic.co/elasticsearch/elasticsearch@sha256:84a73ced8390c059e7bc2858595c68dc36e6f8bdb98895dcab0074eda35ac96e"
+}

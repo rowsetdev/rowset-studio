@@ -28,6 +28,8 @@ func (m *Manager) ObjectDDL(ctx context.Context, connection Connection, kind, sc
 		return "", errors.New("object name is required")
 	}
 	switch engine {
+	case "snowflake":
+		return "", errors.New("DDL viewing is not available for Snowflake yet")
 	case "mysql", "mariadb":
 		return mysqlDDL(ctx, db, kind, schemaName, name)
 	case "mssql", "sqlserver":
@@ -274,11 +276,11 @@ func sqlServerTableDDL(ctx context.Context, db *sql.DB, schemaName, name string)
 	if len(columns) == 0 {
 		return "", errors.New("table not found")
 	}
-	keys, err := queryStrings(ctx, db, `SELECT '  CONSTRAINT ' + QUOTENAME(k.name) + ' ' + REPLACE(REPLACE(k.type_desc COLLATE DATABASE_DEFAULT, '_CONSTRAINT', ''), '_', ' ') + ' (' +
+	keys, err := queryStrings(ctx, db, `SELECT '  CONSTRAINT ' + QUOTENAME(k.name) + ' ' + REPLACE(REPLACE(k.type_desc COLLATE DATABASE_DEFAULT, '_CONSTRAINT', ''), '_', ' ') + CASE WHEN i.type=1 THEN ' CLUSTERED' ELSE ' NONCLUSTERED' END + ' (' +
 		STUFF((SELECT ', ' + QUOTENAME(c.name) + CASE WHEN ic.is_descending_key = 1 THEN ' DESC' ELSE '' END
 			FROM sys.index_columns ic JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
-			WHERE ic.object_id = k.parent_object_id AND ic.index_id = k.unique_index_id ORDER BY ic.key_ordinal FOR XML PATH('')), 1, 2, '') + ')'
-		FROM sys.key_constraints k WHERE k.parent_object_id = OBJECT_ID(`+target+`)`)
+			WHERE ic.object_id = k.parent_object_id AND ic.index_id = k.unique_index_id AND ic.key_ordinal > 0 ORDER BY ic.key_ordinal FOR XML PATH(''), TYPE).value('.', 'nvarchar(max)'), 1, 2, '') + ')'
+		FROM sys.key_constraints k JOIN sys.indexes i ON i.object_id=k.parent_object_id AND i.index_id=k.unique_index_id WHERE k.parent_object_id = OBJECT_ID(`+target+`)`)
 	if err != nil {
 		return "", err
 	}
@@ -286,23 +288,59 @@ func sqlServerTableDDL(ctx context.Context, db *sql.DB, schemaName, name string)
 	if err != nil {
 		return "", err
 	}
-	foreign, err := queryStrings(ctx, db, `SELECT '  CONSTRAINT ' + QUOTENAME(f.name) + ' FOREIGN KEY (' + QUOTENAME(pc.name) + ') REFERENCES ' + QUOTENAME(rs.name) + '.' + QUOTENAME(rt.name) + ' (' + QUOTENAME(rc.name) + ')'
+	foreign, err := queryStrings(ctx, db, `SELECT '  CONSTRAINT ' + QUOTENAME(f.name) + ' FOREIGN KEY (' +
+		STUFF((SELECT ', ' + QUOTENAME(pc.name)
+			FROM sys.foreign_key_columns fc JOIN sys.columns pc ON pc.object_id=fc.parent_object_id AND pc.column_id=fc.parent_column_id
+			WHERE fc.constraint_object_id=f.object_id ORDER BY fc.constraint_column_id FOR XML PATH(''), TYPE).value('.', 'nvarchar(max)') COLLATE DATABASE_DEFAULT, 1, 2, '') + ') REFERENCES ' + QUOTENAME(rs.name) + '.' + QUOTENAME(rt.name) + ' (' +
+		STUFF((SELECT ', ' + QUOTENAME(rc.name)
+			FROM sys.foreign_key_columns fc JOIN sys.columns rc ON rc.object_id=fc.referenced_object_id AND rc.column_id=fc.referenced_column_id
+			WHERE fc.constraint_object_id=f.object_id ORDER BY fc.constraint_column_id FOR XML PATH(''), TYPE).value('.', 'nvarchar(max)') COLLATE DATABASE_DEFAULT, 1, 2, '') + ')' +
+		CASE WHEN f.delete_referential_action_desc <> 'NO_ACTION' THEN ' ON DELETE ' + REPLACE(f.delete_referential_action_desc COLLATE DATABASE_DEFAULT, '_', ' ') ELSE '' END +
+		CASE WHEN f.update_referential_action_desc <> 'NO_ACTION' THEN ' ON UPDATE ' + REPLACE(f.update_referential_action_desc COLLATE DATABASE_DEFAULT, '_', ' ') ELSE '' END
 		FROM sys.foreign_keys f
-		JOIN sys.foreign_key_columns fc ON fc.constraint_object_id = f.object_id
-		JOIN sys.columns pc ON pc.object_id = fc.parent_object_id AND pc.column_id = fc.parent_column_id
-		JOIN sys.tables rt ON rt.object_id = fc.referenced_object_id
+		JOIN sys.tables rt ON rt.object_id = f.referenced_object_id
 		JOIN sys.schemas rs ON rs.schema_id = rt.schema_id
-		JOIN sys.columns rc ON rc.object_id = fc.referenced_object_id AND rc.column_id = fc.referenced_column_id
 		WHERE f.parent_object_id = OBJECT_ID(`+target+`)`)
 	if err != nil {
 		return "", err
 	}
-	indexes, err := queryStrings(ctx, db, `SELECT 'CREATE ' + CASE WHEN i.is_unique = 1 THEN 'UNIQUE ' ELSE '' END + 'INDEX ' + QUOTENAME(i.name) + ' ON ' + QUOTENAME(s.name) + '.' + QUOTENAME(o.name) + ' (' +
+	indexes, err := queryStrings(ctx, db, `SELECT 'CREATE ' + CASE WHEN i.is_unique = 1 THEN 'UNIQUE ' ELSE '' END + CASE WHEN i.type=1 THEN 'CLUSTERED ' ELSE 'NONCLUSTERED ' END + 'INDEX ' + QUOTENAME(i.name) + ' ON ' + QUOTENAME(s.name) + '.' + QUOTENAME(o.name) + ' (' +
 		STUFF((SELECT ', ' + QUOTENAME(c.name) + CASE WHEN ic.is_descending_key = 1 THEN ' DESC' ELSE '' END
 			FROM sys.index_columns ic JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
-			WHERE ic.object_id = i.object_id AND ic.index_id = i.index_id AND ic.is_included_column = 0 ORDER BY ic.key_ordinal FOR XML PATH('')), 1, 2, '') + ');'
+			WHERE ic.object_id = i.object_id AND ic.index_id = i.index_id AND ic.key_ordinal > 0 ORDER BY ic.key_ordinal FOR XML PATH(''), TYPE).value('.', 'nvarchar(max)'), 1, 2, '') + ')' +
+		CASE WHEN EXISTS (SELECT 1 FROM sys.index_columns ic WHERE ic.object_id=i.object_id AND ic.index_id=i.index_id AND ic.is_included_column=1) THEN
+			' INCLUDE (' + STUFF((SELECT ', ' + QUOTENAME(c.name)
+				FROM sys.index_columns ic JOIN sys.columns c ON c.object_id=ic.object_id AND c.column_id=ic.column_id
+				WHERE ic.object_id=i.object_id AND ic.index_id=i.index_id AND ic.is_included_column=1 ORDER BY ic.index_column_id FOR XML PATH(''), TYPE).value('.', 'nvarchar(max)'), 1, 2, '') + ')' ELSE '' END +
+		CASE WHEN i.has_filter=1 THEN ' WHERE ' + i.filter_definition COLLATE DATABASE_DEFAULT ELSE '' END +
+		CASE WHEN i.fill_factor > 0 OR i.is_padded=1 OR i.ignore_dup_key=1 OR i.allow_row_locks=0 OR i.allow_page_locks=0 OR i.optimize_for_sequential_key=1 OR st.no_recompute=1 OR EXISTS (
+			SELECT 1 FROM sys.partitions p WHERE p.object_id=i.object_id AND p.index_id=i.index_id AND p.data_compression_desc <> 'NONE') THEN
+			' WITH (FILLFACTOR = ' + CAST(CASE WHEN i.fill_factor=0 THEN 100 ELSE i.fill_factor END AS varchar(3)) +
+			', PAD_INDEX = ' + CASE WHEN i.is_padded=1 THEN 'ON' ELSE 'OFF' END +
+			', IGNORE_DUP_KEY = ' + CASE WHEN i.ignore_dup_key=1 THEN 'ON' ELSE 'OFF' END +
+			', ALLOW_ROW_LOCKS = ' + CASE WHEN i.allow_row_locks=1 THEN 'ON' ELSE 'OFF' END +
+			', ALLOW_PAGE_LOCKS = ' + CASE WHEN i.allow_page_locks=1 THEN 'ON' ELSE 'OFF' END +
+			', STATISTICS_NORECOMPUTE = ' + CASE WHEN st.no_recompute=1 THEN 'ON' ELSE 'OFF' END +
+			', OPTIMIZE_FOR_SEQUENTIAL_KEY = ' + CASE WHEN i.optimize_for_sequential_key=1 THEN 'ON' ELSE 'OFF' END +
+			ISNULL((SELECT ', DATA_COMPRESSION = ' + p.data_compression_desc COLLATE DATABASE_DEFAULT +
+				CASE WHEN ps.data_space_id IS NOT NULL THEN ' ON PARTITIONS (' + CAST(p.partition_number AS varchar(10)) + ')' ELSE '' END
+				FROM sys.partitions p WHERE p.object_id=i.object_id AND p.index_id=i.index_id AND p.data_compression_desc <> 'NONE'
+				ORDER BY p.partition_number FOR XML PATH(''), TYPE).value('.', 'nvarchar(max)') COLLATE DATABASE_DEFAULT, '') + ')' ELSE '' END +
+		CASE WHEN ps.data_space_id IS NOT NULL THEN ' ON ' + QUOTENAME(ds.name) + '(' + ISNULL((
+			SELECT TOP (1) QUOTENAME(c.name) FROM sys.index_columns ic JOIN sys.columns c ON c.object_id=ic.object_id AND c.column_id=ic.column_id
+			WHERE ic.object_id=i.object_id AND ic.index_id=i.index_id AND ic.partition_ordinal=1), '') + ')'
+			WHEN ds.type='FG' THEN ' ON ' + QUOTENAME(ds.name) ELSE '' END + ';' +
+		CASE WHEN i.is_disabled=1 THEN CHAR(10) + 'ALTER INDEX ' + QUOTENAME(i.name) + ' ON ' + QUOTENAME(s.name) + '.' + QUOTENAME(o.name) + ' DISABLE;' ELSE '' END
 		FROM sys.indexes i JOIN sys.objects o ON o.object_id = i.object_id JOIN sys.schemas s ON s.schema_id = o.schema_id
-		WHERE i.object_id = OBJECT_ID(`+target+`) AND i.is_primary_key = 0 AND i.is_unique_constraint = 0 AND i.type_desc <> 'HEAP'`)
+		LEFT JOIN sys.stats st ON st.object_id=i.object_id AND st.stats_id=i.index_id
+		LEFT JOIN sys.data_spaces ds ON ds.data_space_id=i.data_space_id
+		LEFT JOIN sys.partition_schemes ps ON ps.data_space_id=i.data_space_id
+		WHERE i.object_id = OBJECT_ID(`+target+`) AND i.is_primary_key = 0 AND i.is_unique_constraint = 0 AND i.type IN (1,2)`)
+	if err != nil {
+		return "", err
+	}
+	unsupportedIndexes, err := queryStrings(ctx, db, `SELECT '-- Index ' + QUOTENAME(i.name) + ' (' + i.type_desc COLLATE DATABASE_DEFAULT + ') requires manual recreation'
+		FROM sys.indexes i WHERE i.object_id = OBJECT_ID(`+target+`) AND i.name IS NOT NULL AND i.type NOT IN (1,2) AND i.is_hypothetical=0`)
 	if err != nil {
 		return "", err
 	}
@@ -311,6 +349,9 @@ func sqlServerTableDDL(ctx context.Context, db *sql.DB, schemaName, name string)
 	out.WriteString(strings.Join(append(append(append(columns, keys...), checks...), foreign...), ",\n"))
 	out.WriteString("\n);\n")
 	for _, index := range indexes {
+		out.WriteString("\n" + index + "\n")
+	}
+	for _, index := range unsupportedIndexes {
 		out.WriteString("\n" + index + "\n")
 	}
 	return out.String(), nil

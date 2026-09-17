@@ -1,13 +1,11 @@
 import QueryParameters from "./ParameterFields";
 import { parameterNames, resolveParameters, type QueryParameters as ParameterValues } from "./queryParameters";
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch, type SetStateAction } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useBlocker, useLocation, useNavigate } from "react-router";
 import { Button, Modal, Panel } from "../../components/ui";
 import { Icon, type IconName } from "../../components/Icon";
-import { EnvBadge, envFrame, envKind, envRail } from "../../components/EnvBadge";
-import RowMenu from "../../components/RowMenu";
-import EngineLogo, { engineLabel } from "../../components/EngineLogo";
+import { envFrame, envKind, envRail } from "../../components/EnvBadge";
 import { useEditorStore } from "../../stores/editorStore";
 import { listConnections } from "../connections/api";
 import HistoryPanel from "./HistoryPanel";
@@ -16,8 +14,8 @@ import ResultsGrid, { type ResultEditing } from "./ResultsGrid";
 import RunToolbar, { type WorkspaceStatus } from "./RunToolbar";
 import SaveToNotebookDialog from "../notebooks/SaveToNotebookDialog";
 import PlanPanel, { type PlanState } from "../plan/PlanPanel";
-import SchemaBrowser from "./SchemaBrowser";
-import { explainQuery, exportTable, forgetSchema, getSchema, listDatabases, runOnConnections, runQuery, beginTxn, txnQuery, commitTxn, rollbackTxn, type QueryResult, type SchemaInfo } from "./api";
+import ExplorerPanel from "./ExplorerPanel";
+import { explainQuery, exportTable, getSchema, listDatabases, runOnConnections, runQuery, beginTxn, txnQuery, commitTxn, rollbackTxn, type QueryResult, type SchemaInfo } from "./api";
 import { buildSqlCompletions } from "./sqlCompletions";
 import { useSchema } from "./useEditor";
 import { formatSql, statementAt, splitStatements } from "./sqlText";
@@ -29,7 +27,7 @@ import RedisQueryBar, { redisQuery } from "./RedisQueryBar";
 import ElasticsearchQueryBar, { elasticsearchQuery } from "./ElasticsearchQueryBar";
 import SnippetsMenu from "./SnippetsMenu";
 import { api, ApiError } from "../../lib/api";
-import { useShared } from "../../lib/instance";
+import { useEngineCapabilities, useShared } from "../../lib/instance";
 import { rowBackupEnabled } from "../../lib/preferences";
 import { useActiveExtensions, type DenialContext } from "../../app/extensions";
 import WorkspaceGate, { exportWorkspace, useWorkspacePersistence } from "./WorkspaceGate";
@@ -112,7 +110,6 @@ function isNodeAnnotation(value: unknown): value is { host: string; role?: strin
 }
 
 const MonacoSqlEditor = lazy(() => import("./MonacoSqlEditor"));
-const EXPLORER_TREE_KEY = "rowset.editor.explorerTree";
 
 export default function EditorPage() {
   const user = useAuth(state => state.user);
@@ -165,7 +162,6 @@ function EditorWorkspace({ snapshot, initial }: { snapshot: WorkspaceSnapshot; i
   // A statement the server would not run because its rows cannot be backed up.
   const [backupPrompt, setBackupPrompt] = useState<{ tabId: string; sql: string; reason: string } | null>(null);
   const [explorerOpen, setExplorerOpen] = useState(() => localStorage.getItem("rowset.editor.explorer") !== "collapsed");
-  const [explorerTree, setExplorerTree] = useState<Record<string, boolean>>(() => loadBooleanRecord(EXPLORER_TREE_KEY));
   const [selectedSql, setSelectedSql] = useState("");
   const [cursor, setCursor] = useState({ line: 1, column: 1 });
   // Each tab mounts its own editor; a selection or cursor from the previous
@@ -180,6 +176,7 @@ function EditorWorkspace({ snapshot, initial }: { snapshot: WorkspaceSnapshot; i
   // previous request settled) is dropped instead of clobbering the newer one.
   const runSeq = useRef<Record<string, number>>({});
   const controllers = useRef<Record<string, AbortController>>({});
+  const planControllers = useRef<Record<string, AbortController>>({});
   const scripts = useRef<Record<string, boolean>>({});
   const transactions = useRef<Record<string, { id: string; connectionId: string; database: string }>>({});
   const [transactionIDs, setTransactionIDs] = useState<Record<string, string>>({});
@@ -228,9 +225,6 @@ function EditorWorkspace({ snapshot, initial }: { snapshot: WorkspaceSnapshot; i
     localStorage.setItem("rowset.editor.assistant", assistantOpen ? "open" : "closed");
   }, [assistantOpen]);
 
-  useEffect(() => {
-    localStorage.setItem(EXPLORER_TREE_KEY, JSON.stringify(explorerTree));
-  }, [explorerTree]);
 
   useEffect(() => {
     if (!tabs.some((t) => t.id === activeTabId) && tabs[0]) {
@@ -246,13 +240,14 @@ function EditorWorkspace({ snapshot, initial }: { snapshot: WorkspaceSnapshot; i
       if (Object.keys(transactions.current).length || Object.keys(controllers.current).length || Object.keys(multiControllers.current).length || transactionOperations.current.size || Object.values(scripts.current).some(Boolean)) { event.preventDefault(); event.returnValue = ""; }
     };
     window.addEventListener("beforeunload", leaving);
-    const running = controllers.current, txns = transactions.current, batches = scripts.current, multi = multiControllers.current;
+    const running = controllers.current, txns = transactions.current, batches = scripts.current, multi = multiControllers.current, planRequests = planControllers.current;
     return () => {
       mounted.current = false;
       Object.keys(batches).forEach(id => { batches[id] = false; });
       window.removeEventListener("beforeunload", leaving);
       Object.values(running).forEach(c => c.abort());
       Object.values(multi).forEach(c => c.abort());
+      Object.values(planRequests).forEach(c => c.abort());
       Object.values(txns).forEach(t => void rollbackTxn(t.connectionId, t.id).catch(() => undefined));
     };
   }, []);
@@ -263,6 +258,7 @@ function EditorWorkspace({ snapshot, initial }: { snapshot: WorkspaceSnapshot; i
     staleTime: 60_000,
   });
   const activeConnection = connections.find((c) => c.id === activeConnectionId) ?? null;
+  const capabilities = useEngineCapabilities(activeConnection?.engine);
   const [tabParameters, setTabParameters] = useState<Record<string, ParameterValues>>({});
   const isMongo = activeConnection?.engine === "mongodb";
   const isCassandra = activeConnection?.engine === "cassandra";
@@ -345,6 +341,7 @@ function EditorWorkspace({ snapshot, initial }: { snapshot: WorkspaceSnapshot; i
   }
 
   function patchRun(tabId: string, patch: Partial<TabRunState>) {
+    if (closingTabs.current.has(tabId)) return;
     setRunStates((current) => ({ ...current, [tabId]: { ...(current[tabId] ?? IDLE_RUN), ...patch } }));
   }
 
@@ -387,6 +384,7 @@ function EditorWorkspace({ snapshot, initial }: { snapshot: WorkspaceSnapshot; i
     scripts.current[id] = false;
     controllers.current[id]?.abort();
     multiControllers.current[id]?.abort();
+    planControllers.current[id]?.abort();
     // Invalidate callbacks immediately, including while rollback is in flight.
     delete runSeq.current[id];
     const tx = transactions.current[id];
@@ -403,6 +401,8 @@ function EditorWorkspace({ snapshot, initial }: { snapshot: WorkspaceSnapshot; i
     }
     setTabs((docs) => docs.filter((doc) => doc.id !== id));
     delete runSeq.current[id];
+    setMultiRuns((current) => { if (!(id in current)) return current; const next = { ...current }; delete next[id]; return next; });
+    setPlans((current) => { if (!(id in current)) return current; const next = { ...current }; delete next[id]; return next; });
     setRunStates((current) => {
       if (!(id in current)) return current;
       const next = { ...current };
@@ -447,9 +447,11 @@ function EditorWorkspace({ snapshot, initial }: { snapshot: WorkspaceSnapshot; i
   }
 
   function saveSQLFile() {
-    const url = URL.createObjectURL(new Blob([currentSql], { type: isMongo ? "application/json;charset=utf-8" : "application/sql;charset=utf-8" }));
+    const isJSON = isMongo || isRedis || isElasticsearch;
+    const extension = isJSON ? "json" : isCassandra ? "cql" : "sql";
+    const url = URL.createObjectURL(new Blob([currentSql], { type: isJSON ? "application/json;charset=utf-8" : "text/plain;charset=utf-8" }));
     const anchor = document.createElement("a"); anchor.href = url;
-    anchor.download = `${(activeTab?.title ?? "query").replace(/\.(sql|json)$/i, "").replace(/[\\/:*?"<>|]/g, "_")}.${isMongo ? "json" : "sql"}`;
+    anchor.download = `${(activeTab?.title ?? "query").replace(/\.(sql|json|cql)$/i, "").replace(/[\\/:*?"<>|]/g, "_")}.${extension}`;
     anchor.click(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
@@ -643,13 +645,20 @@ function EditorWorkspace({ snapshot, initial }: { snapshot: WorkspaceSnapshot; i
     if (!connectionId || !sql) return;
     try { sql = resolveParameters(sql, activeConnection?.engine ?? "", parameters); }
     catch (error) { setActiveMessage((error as Error).message, true); setBottomTab("messages"); return; }
+    planControllers.current[tabId]?.abort();
+    const controller = new AbortController();
+    planControllers.current[tabId] = controller;
     setBottomTab("plan");
     setPlans((current) => ({ ...current, [tabId]: { status: "loading", sql, analyze } }));
     try {
-      const result = await explainQuery(connectionId, sql, { database: selectedDb || undefined, nodeRole: selectedNodeRole, analyze });
+      const result = await explainQuery(connectionId, sql, { database: selectedDb || undefined, nodeRole: selectedNodeRole, analyze, signal: controller.signal });
+      if (!mounted.current || closingTabs.current.has(tabId) || planControllers.current[tabId] !== controller) return;
       setPlans((current) => ({ ...current, [tabId]: { status: "ready", sql, analyze, result } }));
     } catch (err) {
+      if (!mounted.current || closingTabs.current.has(tabId) || planControllers.current[tabId] !== controller) return;
       setPlans((current) => ({ ...current, [tabId]: { status: "error", sql, analyze, error: err instanceof Error ? err : new Error("Could not get the plan") } }));
+    } finally {
+      if (planControllers.current[tabId] === controller) delete planControllers.current[tabId];
     }
   }
 
@@ -662,8 +671,10 @@ function EditorWorkspace({ snapshot, initial }: { snapshot: WorkspaceSnapshot; i
     const controller = new AbortController();
     multiControllers.current[tabId] = controller;
     const backup = !shared && rowBackupEnabled();
-    const publish = (outcomes: TargetOutcome[], running: boolean) =>
+    const publish = (outcomes: TargetOutcome[], running: boolean) => {
+      if (closingTabs.current.has(tabId) || !mounted.current) return;
       setMultiRuns((current) => ({ ...current, [tabId]: { outcomes, statements: statements.length, running } }));
+    };
     setBottomTab("connections");
     let outcomes = initialOutcomes(targets, statements.length);
     publish(outcomes, true);
@@ -799,7 +810,7 @@ function EditorWorkspace({ snapshot, initial }: { snapshot: WorkspaceSnapshot; i
 
   // Rows of a one-table result can be edited; the edits run as UPDATEs through
   // runStatements, followed by the original query to reload the result.
-  const rowEditing: RowEditing | undefined = activeConnection && !isMongo ? {
+  const rowEditing: RowEditing | undefined = activeConnection && !activeConnection.readOnly && selectedNodeRole !== "secondary" && !["mongodb", "redis", "valkey", "elasticsearch"].includes(activeConnection.engine) ? {
     engine: activeConnection.engine,
     primaryKey: (schemaName, table) => {
       const nodes = schema?.schemas ?? [];
@@ -843,8 +854,6 @@ function EditorWorkspace({ snapshot, initial }: { snapshot: WorkspaceSnapshot; i
           onSelectConnection={onConnectionChange}
           onSelectDatabase={onDatabaseChange}
           onCollapse={() => setExplorerOpen(false)}
-          treeState={explorerTree}
-          onTreeStateChange={setExplorerTree}
         />
       ) : (
         <button
@@ -919,9 +928,9 @@ function EditorWorkspace({ snapshot, initial }: { snapshot: WorkspaceSnapshot; i
           onExportWorkspace={() => exportWorkspace(workspace)}
           onImportWorkspace={() => workspaceFileInput.current?.click()}
           onRunAll={onRunAll}
-          onRunOnConnections={isMongo ? undefined : onRunOnConnections}
+          onRunOnConnections={activeConnection && !["mongodb", "redis", "valkey", "elasticsearch"].includes(activeConnection.engine) ? onRunOnConnections : undefined}
           onExplain={(analyze) => void onExplain(analyze)}
-          onSchedule={!shared && !isMongo && !parameterList.length ? () => navigate("/schedules", { state: { newSchedule: { sql: statementUnderCursor(), connectionId: activeConnectionId, database: selectedDb } } }) : undefined}
+          onSchedule={!shared && activeConnection && !["mongodb", "redis", "valkey", "cassandra", "elasticsearch"].includes(activeConnection.engine) && !parameterList.length ? () => navigate("/schedules", { state: { newSchedule: { sql: statementUnderCursor(), connectionId: activeConnectionId, database: selectedDb } } }) : undefined}
           onStop={() => {
             if (transactions.current[activeTabId] && !window.confirm("Stopping a statement inside a transaction ends the transaction and discards its uncommitted changes. Stop anyway?")) return;
             scripts.current[activeTabId] = false; controllers.current[activeTabId]?.abort();
@@ -955,7 +964,7 @@ function EditorWorkspace({ snapshot, initial }: { snapshot: WorkspaceSnapshot; i
         <QueryParameters names={parameterList} values={parameters} onChange={values => setTabParameters(current => ({ ...current, [activeTabId]: values }))} />
         <div className="flex min-h-0 flex-1">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <input ref={fileInput} type="file" accept=".sql,.json,text/plain,application/sql,application/json" className="hidden" aria-label="Open SQL file" onChange={(event) => { void openSQLFile(event.target.files?.[0]); event.target.value = ""; }} />
+          <input ref={fileInput} type="file" accept=".sql,.cql,.json,text/plain,application/sql,application/json" className="hidden" aria-label="Open query file" onChange={(event) => { void openSQLFile(event.target.files?.[0]); event.target.value = ""; }} />
           <div className="flex min-h-[120px] flex-1 flex-col border-b border-slate-200 dark:border-slate-800">
             <Suspense
               fallback={<div className="grid h-full place-items-center text-xs text-slate-500">Loading editor...</div>}
@@ -1001,7 +1010,7 @@ function EditorWorkspace({ snapshot, initial }: { snapshot: WorkspaceSnapshot; i
               onStopMultiRun={() => multiControllers.current[activeTabId]?.abort()}
               rowEditing={rowEditing}
               onSelectResult={(index) => patchRun(activeTabId, { activeResult: index })}
-              onExportAllRows={!isMongo && activeRun.sql && activeConnectionId && !transactionIDs[activeTabId] ? () => exportTable(activeConnectionId, { database: selectedDb || undefined, sql: activeRun.sql!, format: "csv" }).then((blob) => {
+              onExportAllRows={capabilities.csvExport && activeRun.sql && activeConnectionId && !transactionIDs[activeTabId] ? () => exportTable(activeConnectionId, { database: selectedDb || undefined, sql: activeRun.sql!, format: "csv" }).then((blob) => {
                 const url = URL.createObjectURL(blob);
                 const link = document.createElement("a");
                 link.href = url;
@@ -1120,396 +1129,6 @@ function ColumnResizeHandle({ onResize }: { onResize: (delta: number) => void })
       <span className="h-full w-px rounded-full bg-slate-200 transition group-hover:w-1 group-hover:bg-cyan-400 dark:bg-slate-800" />
     </div>
   );
-}
-
-type TreeProps = {
-  treeState: Record<string, boolean>;
-  onTreeStateChange: Dispatch<SetStateAction<Record<string, boolean>>>;
-};
-
-const treeGuide = "ml-[13px] border-l border-slate-200/80 pl-1 dark:border-slate-800";
-const shortcutLabel = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘K" : "Ctrl K";
-
-function CountPill({ children }: { children: React.ReactNode }) {
-  return <span className="ml-auto min-w-[18px] shrink-0 rounded bg-slate-100 px-1 text-center text-[10.5px] leading-[17px] tabular-nums text-slate-500 dark:bg-slate-800 dark:text-slate-400">{children}</span>;
-}
-
-function TreeChevron({ open, onClick }: { open: boolean; onClick: () => void }) {
-  return (
-    <button type="button" onClick={onClick} aria-label={open ? "Collapse" : "Expand"} className="grid h-5 w-4 shrink-0 place-items-center text-slate-400 hover:text-slate-700 dark:hover:text-slate-200">
-      <Icon name={open ? "chevron-down" : "chevron-right"} size={12} />
-    </button>
-  );
-}
-
-function ExplorerPanel({
-  connections,
-  activeConnectionId,
-  selectedDb,
-  onSelectConnection,
-  onSelectDatabase,
-  onCollapse,
-  treeState,
-  onTreeStateChange,
-}: {
-  connections: ExplorerConnection[];
-  activeConnectionId: string | null;
-  selectedDb: string;
-  onSelectConnection: (id: string | null) => void;
-  onSelectDatabase: (db: string) => void;
-  onCollapse: () => void;
-} & TreeProps) {
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
-  const [search, setSearch] = useState("");
-  const searchInput = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    const focus = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "k") {
-        event.preventDefault();
-        event.stopPropagation();
-        searchInput.current?.focus();
-        searchInput.current?.select();
-      }
-    };
-    window.addEventListener("keydown", focus, true);
-    return () => window.removeEventListener("keydown", focus, true);
-  }, []);
-  const needle = search.trim().toLowerCase();
-  // A connection stays when its name or a database name matches, or when one of
-  // its databases is expanded, since the table filter then applies inside it.
-  const visible = needle ? connections.filter((conn) =>
-    conn.name.toLowerCase().includes(needle) ||
-    (queryClient.getQueryData<string[]>(["databases", conn.id]) ?? [conn.database]).some((db) => db.toLowerCase().includes(needle)) ||
-    Object.entries(treeState).some(([key, open]) => open && key.startsWith(`database:${conn.id}:`))) : connections;
-
-  return (
-    <Panel className="flex min-h-0 flex-col overflow-hidden">
-      <div className="flex h-9 shrink-0 items-center gap-2 px-2.5">
-        <Icon name="database" size={15} className="text-slate-400" />
-        <span className="truncate text-[13px] font-semibold text-slate-800 dark:text-slate-100">Database Explorer</span>
-        <span className="ml-auto flex items-center gap-1">
-          <button type="button" onClick={() => navigate("/connections")} title="Add a connection" aria-label="Add a connection" className="grid h-6 w-6 place-items-center rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-800 dark:border-slate-800 dark:hover:bg-slate-900 dark:hover:text-slate-100">
-            <Icon name="plus" size={14} />
-          </button>
-          <button type="button" onClick={onCollapse} title="Collapse explorer" aria-label="Collapse explorer" className="grid h-6 w-6 place-items-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-800 dark:hover:bg-slate-900 dark:hover:text-slate-100">
-            <Icon name="chevron-left" size={14} />
-          </button>
-        </span>
-      </div>
-      <div className="shrink-0 px-2 pb-2">
-        <div className="relative">
-          <Icon name="search" size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input
-            ref={searchInput}
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            onKeyDown={(event) => { if (event.key === "Escape") setSearch(""); }}
-            placeholder="Search databases, tables, and columns…"
-            aria-label="Search databases, tables and columns"
-            className="h-7 w-full rounded-md border border-slate-200 bg-white pl-8 pr-12 text-[12px] text-slate-700 outline-none placeholder:text-slate-400 focus:border-slate-400 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200"
-          />
-          {search ? (
-            <button type="button" onClick={() => setSearch("")} aria-label="Clear search" className="absolute right-1.5 top-1/2 grid h-5 w-5 -translate-y-1/2 place-items-center rounded text-slate-400 hover:text-slate-700 dark:hover:text-slate-200">
-              <Icon name="close" size={12} />
-            </button>
-          ) : (
-            <kbd className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 rounded border border-slate-200 bg-slate-50 px-1 font-sans text-[10px] text-slate-400 dark:border-slate-800 dark:bg-slate-900">{shortcutLabel}</kbd>
-          )}
-        </div>
-      </div>
-
-      {/* macOS draws its scrollbar over the content while scrolling; the
-          right padding keeps it off the column types aligned to that edge. */}
-      <div className="min-h-0 flex-1 overflow-auto border-t border-slate-200 pl-1 pr-3 text-[12.5px] dark:border-slate-800">
-        <div className="divide-y divide-slate-100 dark:divide-slate-800/70">
-          {Object.entries(groupConnections(visible)).map(([engine, items]) => (
-            <EngineBranch
-              key={engine}
-              engine={engine}
-              connections={items}
-              activeConnectionId={activeConnectionId}
-              onSelectConnection={onSelectConnection}
-              selectedDb={selectedDb}
-              onSelectDatabase={onSelectDatabase}
-              search={needle}
-              treeState={treeState}
-              onTreeStateChange={onTreeStateChange}
-            />
-          ))}
-        </div>
-        {connections.length === 0 && <div className="px-2 py-3 text-xs text-slate-500">No connections yet. Add one with +.</div>}
-        {connections.length > 0 && visible.length === 0 && <div className="px-2 py-3 text-xs text-slate-500">No connection or database matches “{search.trim()}”. Expand a database to search its tables.</div>}
-      </div>
-    </Panel>
-  );
-}
-
-function EngineBranch({
-  engine,
-  connections,
-  activeConnectionId,
-  onSelectConnection,
-  selectedDb,
-  onSelectDatabase,
-  search,
-  treeState,
-  onTreeStateChange,
-}: {
-  engine: string;
-  connections: ExplorerConnection[];
-  activeConnectionId: string | null;
-  onSelectConnection: (id: string | null) => void;
-  selectedDb: string;
-  onSelectDatabase: (db: string) => void;
-  search: string;
-} & TreeProps) {
-  const treeKey = `engine:${engine}`;
-  const open = Boolean(search) || treeValue(treeState, treeKey, true);
-  return (
-    <div className="py-0.5">
-      <button
-        type="button"
-        onClick={() => onTreeStateChange((current) => ({ ...current, [treeKey]: !open }))}
-        className="flex h-7 w-full items-center gap-2 rounded-md px-1 text-left text-slate-800 hover:bg-slate-50 dark:text-slate-100 dark:hover:bg-slate-900"
-      >
-        <span className="grid w-4 shrink-0 place-items-center text-slate-400"><Icon name={open ? "chevron-down" : "chevron-right"} size={12} /></span>
-        <EngineLogo engine={engine} size={15} />
-        <span className="truncate text-[12.5px] font-medium">{engineLabel(engine)}</span>
-        <CountPill>{connections.length}</CountPill>
-      </button>
-      {open && (
-        <div className={treeGuide}>
-          {connections.map((conn) => (
-            <ConnectionBranch
-              key={conn.id}
-              conn={conn}
-              active={conn.id === activeConnectionId}
-              selectedDb={conn.id === activeConnectionId ? selectedDb : ""}
-              onSelect={() => onSelectConnection(conn.id)}
-              onSelectDatabase={(db) => {
-                onSelectConnection(conn.id);
-                onSelectDatabase(db);
-              }}
-              search={search}
-              treeState={treeState}
-              onTreeStateChange={onTreeStateChange}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ConnectionBranch({
-  conn,
-  active,
-  selectedDb,
-  onSelect,
-  onSelectDatabase,
-  search,
-  treeState,
-  onTreeStateChange,
-}: {
-  conn: ExplorerConnection;
-  active: boolean;
-  selectedDb: string;
-  onSelect: () => void;
-  onSelectDatabase: (db: string) => void;
-  search: string;
-} & TreeProps) {
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
-  const treeKey = `connection:${conn.id}`;
-  const open = Boolean(search) || treeValue(treeState, treeKey, true);
-  const { data: databases = [] } = useQuery({
-    queryKey: ["databases", conn.id],
-    queryFn: () => listDatabases(conn.id),
-    enabled: open,
-  });
-  const databaseNames = uniqueNames(databases.length ? databases : [conn.database || "default"]);
-  const nameMatches = !search || conn.name.toLowerCase().includes(search);
-  const shown = (db: string) => nameMatches || db.toLowerCase().includes(search) || treeValue(treeState, `database:${conn.id}:${db}`, false);
-  const split = splitDatabases(conn.engine, databaseNames, conn.database || "default");
-  const primary = split.primary.filter(shown);
-  const system = split.system.filter(shown);
-  const activeDb = selectedDb || conn.database || "default";
-  return (
-    <div>
-      <div className={`group flex h-7 items-center gap-1.5 rounded-md px-1 ${active ? "bg-slate-100 dark:bg-slate-800/60" : "hover:bg-slate-50 dark:hover:bg-slate-900"}`}>
-        <TreeChevron open={open} onClick={() => onTreeStateChange((current) => ({ ...current, [treeKey]: !open }))} />
-        <button type="button" onClick={onSelect} className="flex min-w-0 flex-1 items-center gap-2 text-left">
-          <span title={`${conn.environment} connection`} className={`h-2 w-2 shrink-0 rounded-full ${envRail[envKind(conn.environment)]}`} />
-          <span className="truncate font-medium text-slate-800 dark:text-slate-100">{conn.name}</span>
-        </button>
-        {envKind(conn.environment) === "prod" && <EnvBadge env={conn.environment} />}
-        <RowMenu
-          label={`${conn.name} actions`}
-          className="opacity-60 group-hover:opacity-100"
-          items={[
-            { label: "Use in this tab", onSelect },
-            {
-              label: "Refresh databases and schema",
-              onSelect: () => {
-                void queryClient.invalidateQueries({ queryKey: ["databases", conn.id] });
-                void forgetSchema(conn.id).finally(() => queryClient.invalidateQueries({ queryKey: ["schema", conn.id] }));
-              },
-            },
-            { label: "Edit connection", onSelect: () => navigate("/connections") },
-          ]}
-        />
-      </div>
-      {open && (
-        <div className={`${treeGuide} mt-0.5 border-t-0`}>
-          {system.length > 0 && (
-            <SystemDatabaseBranch
-              connectionId={conn.id}
-              engine={conn.engine}
-              databaseNames={system}
-              activeDb={activeDb}
-              active={active}
-              forceOpen={Boolean(search) && !nameMatches}
-              search={search}
-              onSelectDatabase={onSelectDatabase}
-              treeState={treeState}
-              onTreeStateChange={onTreeStateChange}
-            />
-          )}
-          {primary.map((db) => (
-            <DatabaseBranch
-              key={db}
-              name={db}
-              active={active && db === activeDb}
-              connectionId={conn.id}
-              engine={conn.engine}
-              search={search}
-              treeState={treeState}
-              onTreeStateChange={onTreeStateChange}
-              onSelect={() => onSelectDatabase(db)}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function DatabaseBranch({
-  name,
-  active,
-  connectionId,
-  engine,
-  search,
-  treeState,
-  onTreeStateChange,
-  onSelect,
-}: {
-  name: string;
-  active: boolean;
-  connectionId: string;
-  engine: string;
-  search: string;
-  onSelect: () => void;
-} & TreeProps) {
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
-  const treeKey = `database:${connectionId}:${name}`;
-  const open = treeValue(treeState, treeKey, false);
-  const shouldLoadSchema = open || active;
-  const { data: schema, isFetching } = useSchema(connectionId, name, shouldLoadSchema);
-  const tableCount = schema?.schemas.reduce((count, item) => count + (item.tables?.length ?? 0), 0);
-  return (
-    <div>
-      <div className={`group flex h-6 items-center gap-1.5 rounded-md px-1 ${active ? "text-slate-900 dark:text-slate-100" : "text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-900"}`}>
-        <TreeChevron open={open} onClick={() => onTreeStateChange((current) => ({ ...current, [treeKey]: !open }))} />
-        <button type="button" onClick={onSelect} className="flex min-w-0 flex-1 items-center gap-2 text-left">
-          <Icon name="database" size={13} className={`shrink-0 ${active ? "text-slate-600 dark:text-slate-300" : "text-slate-400"}`} />
-          <span className={`truncate ${active ? "font-medium" : ""}`}>{name}</span>
-        </button>
-        <RowMenu
-          label={`${name} actions`}
-          className="opacity-0 group-hover:opacity-100"
-          items={[
-            ...(engine !== "mongodb" ? [{ label: "Compare schema", onSelect: () => navigate(`/schema-compare?connection=${encodeURIComponent(connectionId)}&database=${encodeURIComponent(name)}`) },
-            { label: "Show diagram", onSelect: () => navigate(`/diagram?connection=${encodeURIComponent(connectionId)}&database=${encodeURIComponent(name)}`) }] : []),
-            { label: "Refresh schema", onSelect: () => void forgetSchema(connectionId).finally(() => queryClient.invalidateQueries({ queryKey: ["schema", connectionId, name] })) },
-          ]}
-        />
-        <CountPill>{schema ? tableCount ?? 0 : !shouldLoadSchema ? "—" : isFetching ? "…" : 0}</CountPill>
-      </div>
-      {open && (
-        <div className={`${treeGuide} pb-1 pt-0.5`}>
-          <SchemaBrowser connectionId={connectionId} database={name} engine={engine} search={search} compact />
-        </div>
-      )}
-    </div>
-  );
-}
-
-function SystemDatabaseBranch({
-  connectionId,
-  engine,
-  databaseNames,
-  activeDb,
-  active,
-  forceOpen,
-  search,
-  onSelectDatabase,
-  treeState,
-  onTreeStateChange,
-}: {
-  connectionId: string;
-  engine: string;
-  databaseNames: string[];
-  activeDb: string;
-  active: boolean;
-  forceOpen: boolean;
-  search: string;
-  onSelectDatabase: (db: string) => void;
-} & TreeProps) {
-  const treeKey = `system-databases:${connectionId}`;
-  const open = forceOpen || treeValue(treeState, treeKey, false);
-  return (
-    <div className="border-b border-slate-100 pb-0.5 dark:border-slate-800/70">
-      <div className="flex h-6 items-center gap-1.5 rounded-md px-1 text-slate-600 hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-900">
-        <TreeChevron open={open} onClick={() => onTreeStateChange((current) => ({ ...current, [treeKey]: !open }))} />
-        <button type="button" onClick={() => onTreeStateChange((current) => ({ ...current, [treeKey]: !open }))} className="flex min-w-0 flex-1 items-center gap-2 text-left">
-          <Icon name="database" size={13} className="shrink-0 text-slate-400" />
-          <span className="truncate">system databases</span>
-        </button>
-        <CountPill>{databaseNames.length}</CountPill>
-      </div>
-      {open && (
-        <div className={treeGuide}>
-          {databaseNames.map((db) => (
-            <DatabaseBranch
-              key={db}
-              name={db}
-              active={active && db === activeDb}
-              connectionId={connectionId}
-              engine={engine}
-              search={search}
-              treeState={treeState}
-              onTreeStateChange={onTreeStateChange}
-              onSelect={() => onSelectDatabase(db)}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-type ExplorerConnection = { id: string; name: string; engine: string; environment: string; database: string };
-
-function groupConnections(connections: ExplorerConnection[]) {
-  return connections.reduce<Record<string, ExplorerConnection[]>>((acc, conn) => {
-    const key = conn.engine || "database";
-    acc[key] = acc[key] ?? [];
-    acc[key].push(conn);
-    return acc;
-  }, {});
 }
 
 function WorkspaceTabs({
@@ -1823,24 +1442,6 @@ function MessagePanel({ message, error }: { message: string; error: string }) {
   );
 }
 
-function loadBooleanRecord(key: string) {
-  const raw = localStorage.getItem(key);
-  if (!raw) return {};
-  try {
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    if (!parsed || typeof parsed !== "object") return {};
-    return Object.fromEntries(
-      Object.entries(parsed).filter((entry): entry is [string, boolean] => typeof entry[1] === "boolean"),
-    );
-  } catch {
-    return {};
-  }
-}
-
-function treeValue(tree: Record<string, boolean>, key: string, fallback: boolean) {
-  return tree[key] ?? fallback;
-}
-
 function defaultSql(engine?: string) {
   if (engine === "mongodb") return mongoQuery();
   if (engine === "redis" || engine === "valkey") return redisQuery();
@@ -1852,30 +1453,4 @@ function defaultDatabase(engine?: string) {
   if (engine === "mysql" || engine === "mariadb") return "mysql";
   if (engine === "sqlserver" || engine === "mssql") return "master";
   return "postgres";
-}
-
-function uniqueNames(names: string[]) {
-  return Array.from(new Set(names.filter(Boolean)));
-}
-
-function splitDatabases(engine: string, names: string[], _primaryDatabase: string) {
-  const primary = uniqueNames(names.filter((name) => !isSystemDatabase(engine, name)));
-  const system = uniqueNames(names.filter((name) => isSystemDatabase(engine, name))).sort((a, b) =>
-    a.localeCompare(b),
-  );
-  return { primary, system };
-}
-
-function isSystemDatabase(engine: string, database: string) {
-  const name = database.toLowerCase();
-  if (engine === "mysql" || engine === "mariadb") {
-    return ["information_schema", "mysql", "performance_schema", "sys"].includes(name);
-  }
-  if (engine === "postgres") {
-    return ["postgres", "template0", "template1", "cloudsqladmin", "rdsadmin", "azure_maintenance", "azure_sys"].includes(name);
-  }
-  if (engine === "sqlserver" || engine === "mssql") {
-    return ["master", "model", "msdb", "tempdb"].includes(name);
-  }
-  return false;
 }

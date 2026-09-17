@@ -22,7 +22,7 @@ func TestLiveExplainReturnsReadablePlans(t *testing.T) {
 		{"postgres", "ROWSET_MATRIX_POSTGRES_PASSWORD", "postgres", "public.rowset_plan", 55432, []string{`DROP TABLE IF EXISTS public.rowset_plan`, `CREATE TABLE public.rowset_plan(id int primary key, name text)`}, `"Plan"`, `"Actual Rows"`},
 		{"mysql", "ROWSET_MATRIX_MYSQL_PASSWORD", "root", "rowset_plan", 53306, []string{`DROP TABLE IF EXISTS rowset_plan`, `CREATE TABLE rowset_plan(id int primary key, name varchar(40))`}, `"query_block"`, "actual time"},
 		{"mariadb", "ROWSET_MATRIX_MARIADB_PASSWORD", "root", "rowset_plan", 53307, []string{`DROP TABLE IF EXISTS rowset_plan`, `CREATE TABLE rowset_plan(id int primary key, name varchar(40))`}, `"query_block"`, `"r_loops"`},
-		{"mssql", "ROWSET_MATRIX_MSSQL_PASSWORD", "sa", "dbo.rowset_plan", 51433, []string{`IF OBJECT_ID('dbo.rowset_plan','U') IS NOT NULL DROP TABLE dbo.rowset_plan`, `CREATE TABLE dbo.rowset_plan(id int primary key, name nvarchar(40))`}, "ShowPlanXML", ""},
+		{"mssql", "ROWSET_MATRIX_MSSQL_PASSWORD", "sa", "dbo.rowset_plan", 51433, []string{`IF OBJECT_ID('dbo.rowset_plan','U') IS NOT NULL DROP TABLE dbo.rowset_plan`, `CREATE TABLE dbo.rowset_plan(id int primary key, name nvarchar(40))`}, "ShowPlanXML", "ActualRows"},
 	}
 	for _, test := range tests {
 		t.Run(test.engine, func(t *testing.T) {
@@ -35,7 +35,7 @@ func TestLiveExplainReturnsReadablePlans(t *testing.T) {
 			manager := NewManager()
 			defer manager.Close()
 			// One pooled connection, so a leftover SHOWPLAN session would be reused.
-			connection := Connection{ID: "plan-" + test.engine, Engine: test.engine, Host: "127.0.0.1", Port: test.port, Database: "rowset_e2e", Username: test.user, Password: password, PoolSize: 1}
+			connection := Connection{ID: "plan-" + test.engine, Engine: test.engine, Host: "127.0.0.1", Port: liveSQLPort(t, test.engine, test.port), Database: "rowset_e2e", Username: test.user, Password: password, PoolSize: 1}
 			for _, statement := range test.setup {
 				if _, err := manager.Execute(ctx, connection, statement, 0); err != nil {
 					t.Fatal(err)

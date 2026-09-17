@@ -1,0 +1,8 @@
+{"Time":"2026-09-16T22:06:31.967596+03:00","Action":"start","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine"}
+{"Time":"2026-09-16T22:06:32.955567+03:00","Action":"run","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Test":"TestSQLiteFileQuerySchemaDDLAndRollback"}
+{"Time":"2026-09-16T22:06:32.955651+03:00","Action":"output","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Test":"TestSQLiteFileQuerySchemaDDLAndRollback","Output":"=== RUN   TestSQLiteFileQuerySchemaDDLAndRollback\n"}
+{"Time":"2026-09-16T22:06:32.962222+03:00","Action":"output","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Test":"TestSQLiteFileQuerySchemaDDLAndRollback","Output":"--- PASS: TestSQLiteFileQuerySchemaDDLAndRollback (0.01s)\n"}
+{"Time":"2026-09-16T22:06:32.962231+03:00","Action":"pass","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Test":"TestSQLiteFileQuerySchemaDDLAndRollback","Elapsed":0.01}
+{"Time":"2026-09-16T22:06:32.962248+03:00","Action":"output","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Output":"PASS\n"}
+{"Time":"2026-09-16T22:06:32.963201+03:00","Action":"output","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Output":"ok  \tgithub.com/dbaopsio/rowset-studio/rowset-core/internal/engine\t0.995s\n"}
+{"Time":"2026-09-16T22:06:32.96322+03:00","Action":"pass","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Elapsed":0.996}

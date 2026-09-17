@@ -127,7 +127,7 @@ func (m *Manager) Schema(ctx context.Context, connection Connection) (Schema, er
 	// metadata concurrently and cap the whole enrichment phase: a database user
 	// may have SELECT without VIEW DEFINITION, and one slow/denied object kind
 	// must not hide every table in a large database.
-	enrichmentCtx, cancelEnrichment := context.WithTimeout(ctx, 5*time.Second)
+	enrichmentCtx, cancelEnrichment := context.WithTimeout(ctx, 15*time.Second)
 	defer cancelEnrichment()
 	enrichments := loadSchemaEnrichments(enrichmentCtx, db, engine)
 	// One read per loader in loadSchemaEnrichments: primary keys, foreign
@@ -215,36 +215,51 @@ type schemaEnrichment struct {
 
 func loadSchemaEnrichments(ctx context.Context, db *sql.DB, engine string) <-chan schemaEnrichment {
 	output := make(chan schemaEnrichment, 7)
-	// Run these short catalog reads in order. Opening seven reads concurrently
-	// exhausts deliberately small PostgreSQL instances (and other constrained
-	// databases), leaving otherwise available metadata marked as missing.
-	go func() {
-		defer close(output)
-		items, err := loadPrimaryKeys(ctx, db, engine)
-		output <- schemaEnrichment{name: "primary keys", primaryKeys: items, err: err}
-		itemsFK, err := loadForeignKeys(ctx, db, engine)
-		output <- schemaEnrichment{name: "foreign keys", foreignKeys: itemsFK, err: err}
-
-		indexes := Schema{Indexes: map[string][]Index{}}
-		err = loadIndexes(ctx, db, engine, &indexes)
-		output <- schemaEnrichment{name: "indexes", indexes: indexes.Indexes, err: err}
-
-		views := Schema{Views: map[string]bool{}}
-		err = loadViews(ctx, db, engine, &views)
-		output <- schemaEnrichment{name: "views", views: views.Views, err: err}
-
-		routines := Schema{}
-		err = loadRoutines(ctx, db, engine, &routines)
-		output <- schemaEnrichment{name: "routines", routines: routines.Routines, err: err}
-
-		triggers := Schema{}
-		err = loadTriggers(ctx, db, engine, &triggers)
-		output <- schemaEnrichment{name: "triggers", triggers: triggers.Triggers, err: err}
-
-		sequences := Schema{}
-		err = loadSequences(ctx, db, engine, &sequences)
-		output <- schemaEnrichment{name: "sequences", sequences: sequences.Sequences, err: err}
-	}()
+	// At most two catalog reads run together, so a slow object kind does not
+	// consume the entire deadline while small database pools remain usable.
+	limit := make(chan struct{}, 2)
+	loaders := []func() schemaEnrichment{
+		func() schemaEnrichment {
+			items, err := loadPrimaryKeys(ctx, db, engine)
+			return schemaEnrichment{name: "primary keys", primaryKeys: items, err: err}
+		},
+		func() schemaEnrichment {
+			items, err := loadForeignKeys(ctx, db, engine)
+			return schemaEnrichment{name: "foreign keys", foreignKeys: items, err: err}
+		},
+		func() schemaEnrichment {
+			value := Schema{Indexes: map[string][]Index{}}
+			err := loadIndexes(ctx, db, engine, &value)
+			return schemaEnrichment{name: "indexes", indexes: value.Indexes, err: err}
+		},
+		func() schemaEnrichment {
+			value := Schema{Views: map[string]bool{}}
+			err := loadViews(ctx, db, engine, &value)
+			return schemaEnrichment{name: "views", views: value.Views, err: err}
+		},
+		func() schemaEnrichment {
+			value := Schema{}
+			err := loadRoutines(ctx, db, engine, &value)
+			return schemaEnrichment{name: "routines", routines: value.Routines, err: err}
+		},
+		func() schemaEnrichment {
+			value := Schema{}
+			err := loadTriggers(ctx, db, engine, &value)
+			return schemaEnrichment{name: "triggers", triggers: value.Triggers, err: err}
+		},
+		func() schemaEnrichment {
+			value := Schema{}
+			err := loadSequences(ctx, db, engine, &value)
+			return schemaEnrichment{name: "sequences", sequences: value.Sequences, err: err}
+		},
+	}
+	for _, loader := range loaders {
+		go func() {
+			limit <- struct{}{}
+			defer func() { <-limit }()
+			output <- loader()
+		}()
+	}
 	return output
 }
 
@@ -320,6 +335,11 @@ func loadForeignKeys(ctx context.Context, db *sql.DB, engine string) (map[string
 		query = `SELECT CAST(table_schema AS CHAR),CAST(table_name AS CHAR),CAST(column_name AS CHAR),CAST(referenced_table_schema AS CHAR),CAST(referenced_table_name AS CHAR),CAST(referenced_column_name AS CHAR) FROM information_schema.key_column_usage WHERE table_schema=DATABASE() AND referenced_table_name IS NOT NULL`
 	case "mssql", "sqlserver":
 		query = `SELECT s.name,t.name,c.name,rs.name,rt.name,rc.name FROM sys.foreign_key_columns fkc JOIN sys.tables t ON t.object_id=fkc.parent_object_id JOIN sys.schemas s ON s.schema_id=t.schema_id JOIN sys.columns c ON c.object_id=fkc.parent_object_id AND c.column_id=fkc.parent_column_id JOIN sys.tables rt ON rt.object_id=fkc.referenced_object_id JOIN sys.schemas rs ON rs.schema_id=rt.schema_id JOIN sys.columns rc ON rc.object_id=fkc.referenced_object_id AND rc.column_id=fkc.referenced_column_id`
+	case "snowflake":
+		query = `SELECT fk.table_schema,fk.table_name,fk.column_name,pk.table_schema,pk.table_name,pk.column_name
+			FROM information_schema.referential_constraints rc
+			JOIN information_schema.key_column_usage fk ON fk.constraint_catalog=rc.constraint_catalog AND fk.constraint_schema=rc.constraint_schema AND fk.constraint_name=rc.constraint_name
+			JOIN information_schema.key_column_usage pk ON pk.constraint_catalog=rc.unique_constraint_catalog AND pk.constraint_schema=rc.unique_constraint_schema AND pk.constraint_name=rc.unique_constraint_name AND pk.ordinal_position=fk.ordinal_position`
 	}
 	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
@@ -348,7 +368,9 @@ func loadIndexes(ctx context.Context, db *sql.DB, engine string, schema *Schema)
 	case "mysql", "mariadb":
 		query = `SELECT CAST(table_schema AS CHAR),CAST(table_name AS CHAR),CAST(index_name AS CHAR),(non_unique=0),(index_name='PRIMARY'),CAST(column_name AS CHAR) FROM information_schema.statistics WHERE table_schema=DATABASE() ORDER BY table_schema,table_name,index_name,seq_in_index`
 	case "mssql", "sqlserver":
-		query = `SELECT s.name,t.name,i.name,i.is_unique,i.is_primary_key,c.name FROM sys.indexes i JOIN sys.tables t ON t.object_id=i.object_id JOIN sys.schemas s ON s.schema_id=t.schema_id JOIN sys.index_columns ic ON ic.object_id=i.object_id AND ic.index_id=i.index_id JOIN sys.columns c ON c.object_id=ic.object_id AND c.column_id=ic.column_id WHERE i.name IS NOT NULL ORDER BY s.name,t.name,i.name,ic.key_ordinal`
+		query = `SELECT s.name,t.name,i.name,i.is_unique,i.is_primary_key,c.name,ic.is_included_column,i.filter_definition FROM sys.indexes i JOIN sys.tables t ON t.object_id=i.object_id JOIN sys.schemas s ON s.schema_id=t.schema_id JOIN sys.index_columns ic ON ic.object_id=i.object_id AND ic.index_id=i.index_id JOIN sys.columns c ON c.object_id=ic.object_id AND c.column_id=ic.column_id WHERE i.name IS NOT NULL ORDER BY s.name,t.name,i.name,ic.is_included_column,ic.key_ordinal,ic.index_column_id`
+	case "snowflake":
+		query = `SELECT table_schema,table_name,index_name,is_unique='YES',FALSE,name,is_included_column='YES',NULL FROM information_schema.index_columns WHERE table_schema <> 'INFORMATION_SCHEMA' ORDER BY table_schema,table_name,index_name,is_included_column,key_sequence`
 	}
 	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
@@ -358,20 +380,38 @@ func loadIndexes(ctx context.Context, db *sql.DB, engine string, schema *Schema)
 	for rows.Next() {
 		var schemaName, table, name, column string
 		var unique, primary bool
-		if err := rows.Scan(&schemaName, &table, &name, &unique, &primary, &column); err != nil {
+		var included bool
+		var filter sql.NullString
+		var err error
+		if engine == "mssql" || engine == "sqlserver" || engine == "snowflake" {
+			err = rows.Scan(&schemaName, &table, &name, &unique, &primary, &column, &included, &filter)
+		} else {
+			err = rows.Scan(&schemaName, &table, &name, &unique, &primary, &column)
+		}
+		if err != nil {
 			return err
 		}
 		key := tableKey(schemaName, table)
 		found := false
 		for index := range schema.Indexes[key] {
 			if schema.Indexes[key][index].Name == name {
-				schema.Indexes[key][index].Columns = append(schema.Indexes[key][index].Columns, column)
+				if included {
+					schema.Indexes[key][index].IncludedColumns = append(schema.Indexes[key][index].IncludedColumns, column)
+				} else {
+					schema.Indexes[key][index].Columns = append(schema.Indexes[key][index].Columns, column)
+				}
 				found = true
 				break
 			}
 		}
 		if !found {
-			schema.Indexes[key] = append(schema.Indexes[key], Index{Name: name, Columns: []string{column}, Unique: unique, Primary: primary})
+			item := Index{Name: name, Unique: unique, Primary: primary, Filter: filter.String}
+			if included {
+				item.IncludedColumns = []string{column}
+			} else {
+				item.Columns = []string{column}
+			}
+			schema.Indexes[key] = append(schema.Indexes[key], item)
 		}
 	}
 	return rows.Err()
@@ -385,6 +425,8 @@ func loadViews(ctx context.Context, db *sql.DB, engine string, schema *Schema) e
 		query += " WHERE table_schema=DATABASE()"
 	} else if engine == "mssql" || engine == "sqlserver" {
 		query = "SELECT s.name,v.name FROM sys.views v JOIN sys.schemas s ON s.schema_id=v.schema_id WHERE v.is_ms_shipped=0"
+	} else if engine == "snowflake" {
+		query += " WHERE table_schema <> 'INFORMATION_SCHEMA'"
 	}
 	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
@@ -411,6 +453,8 @@ func loadSequences(ctx context.Context, db *sql.DB, engine string, schema *Schem
 		query = "SELECT table_schema,table_name FROM information_schema.tables WHERE table_type='SEQUENCE' AND table_schema=DATABASE()"
 	case "mssql", "sqlserver":
 		query = "SELECT s.name,q.name FROM sys.sequences q JOIN sys.schemas s ON s.schema_id=q.schema_id"
+	case "snowflake":
+		query = "SELECT sequence_schema,sequence_name FROM information_schema.sequences WHERE sequence_schema <> 'INFORMATION_SCHEMA'"
 	default:
 		return nil
 	}
@@ -433,6 +477,9 @@ func loadRoutines(ctx context.Context, db *sql.DB, engine string, schema *Schema
 	var query string
 	if engine == "mssql" || engine == "sqlserver" {
 		query = `SELECT s.name,o.name,CASE WHEN RTRIM(o.type)='P' THEN 'procedure' ELSE 'function' END FROM sys.objects o JOIN sys.schemas s ON s.schema_id=o.schema_id WHERE o.type IN ('P','FN','IF','TF') ORDER BY s.name,o.name`
+	} else if engine == "snowflake" {
+		query = `SELECT routine_schema,routine_name,LOWER(routine_type) FROM information_schema.routines WHERE routine_schema <> 'INFORMATION_SCHEMA'
+			UNION ALL SELECT procedure_schema,procedure_name,'procedure' FROM information_schema.procedures WHERE procedure_schema <> 'INFORMATION_SCHEMA'`
 	} else {
 		query = "SELECT routine_schema,routine_name,LOWER(routine_type) FROM information_schema.routines"
 		if engine == "postgres" {
@@ -458,6 +505,9 @@ func loadRoutines(ctx context.Context, db *sql.DB, engine string, schema *Schema
 }
 
 func loadTriggers(ctx context.Context, db *sql.DB, engine string, schema *Schema) error {
+	if engine == "snowflake" {
+		return nil
+	}
 	var query string
 	if engine == "mssql" || engine == "sqlserver" {
 		query = `SELECT s.name,tr.name,t.name,CASE WHEN tr.is_instead_of_trigger=1 THEN 'INSTEAD OF' ELSE 'AFTER' END,te.type_desc FROM sys.triggers tr JOIN sys.tables t ON t.object_id=tr.parent_id JOIN sys.schemas s ON s.schema_id=t.schema_id JOIN sys.trigger_events te ON te.object_id=tr.object_id ORDER BY s.name,t.name,tr.name`

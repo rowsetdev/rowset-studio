@@ -58,6 +58,9 @@ func Evaluate(input Input) Decision {
 		return Decision{Effect: Deny, PolicyID: "unknown_statement", Reason: "unclassifiable SQL is forbidden", Risk: Critical}
 	}
 	if stmt.Kind == sqlguard.Other {
+		if input.ReadOnly && !input.Cleared {
+			return Decision{Effect: Deny, PolicyID: "read_only_unclassified", Reason: "read-only role may not run unclassified statements", Risk: High}
+		}
 		if input.Enabled["deny_unclassified"] {
 			if d, ok := deny("deny_unclassified", "unclassified statements are forbidden", High); ok {
 				return d
