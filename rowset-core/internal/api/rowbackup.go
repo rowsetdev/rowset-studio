@@ -511,11 +511,6 @@ func (s *Server) applyRowBackup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "NOT_FOUND", "row backup not found")
 		return
 	}
-	payload, err := s.openRowBackup(item)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "INTERNAL", "the backup could not be read")
-		return
-	}
 	connection, err := s.store.Connection(r.Context(), item.ConnectionID)
 	if err != nil || connection.OrgID != identity.OrgID {
 		writeError(w, http.StatusNotFound, "NOT_FOUND", "the connection no longer exists")
@@ -528,6 +523,18 @@ func (s *Server) applyRowBackup(w http.ResponseWriter, r *http.Request) {
 	}
 	if !s.canUseConnection(r, identity, role.ID, connection) {
 		writeError(w, http.StatusForbidden, "FORBIDDEN", "you no longer have access to this connection")
+		return
+	}
+	// The stored payload's shape is engine-specific (rowBackupPayload's SQL
+	// columns/rows vs mongoBackupPayload's whole documents), so which decoder
+	// runs must be chosen before either one touches the ciphertext.
+	if connection.Engine == "mongodb" {
+		s.applyMongoRowBackup(w, r, identity, connection, item)
+		return
+	}
+	payload, err := s.openRowBackup(item)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "INTERNAL", "the backup could not be read")
 		return
 	}
 	statements, identityInsert := restorePlan(connection.Engine, item, payload)
@@ -627,14 +634,23 @@ func (s *Server) rowBackupRestore(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "NOT_FOUND", "row backup not found")
 		return
 	}
-	payload, err := s.openRowBackup(item)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "INTERNAL", "the backup could not be read")
-		return
-	}
 	connection, err := s.store.Connection(r.Context(), item.ConnectionID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "NOT_FOUND", "the connection no longer exists")
+		return
+	}
+	if connection.Engine == "mongodb" {
+		payload, err := s.openMongoRowBackup(item)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "INTERNAL", "the backup could not be read")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"sql": mongoRestoreScript(item, payload), "connectionId": item.ConnectionID, "database": item.Database, "table": item.Table})
+		return
+	}
+	payload, err := s.openRowBackup(item)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "INTERNAL", "the backup could not be read")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"sql": restoreSQL(connection.Engine, item, payload), "connectionId": item.ConnectionID, "database": item.Database, "table": item.Table})

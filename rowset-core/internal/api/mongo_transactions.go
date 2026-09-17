@@ -156,7 +156,11 @@ func (s *Server) mongoTxnUpdate(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var input engine.MongoUpdateInput
+	identity := identityFromContext(r.Context())
+	var input struct {
+		engine.MongoUpdateInput
+		Backup bool `json:"backup"`
+	}
 	if !decodeJSON(w, r, &input) {
 		return
 	}
@@ -186,16 +190,25 @@ func (s *Server) mongoTxnUpdate(w http.ResponseWriter, r *http.Request) {
 	}()
 	item.mu.Lock()
 	defer item.mu.Unlock()
+	var backupAnnotations Annotations
+	if input.Backup {
+		backupAnnotations = s.mongoCaptureTxnBackup(identity, connection, item.transaction, connection.Database, input.Collection, "update", string(raw), input.Filter)
+		if reason, ok := backupAnnotations["backupBlocked"].(string); ok {
+			writeError(w, http.StatusConflict, "BACKUP_UNAVAILABLE", reason)
+			return
+		}
+	}
 	started := time.Now()
-	matched, modified, err := item.transaction.UpdateOne(input)
+	matched, modified, err := item.transaction.UpdateOne(input.MongoUpdateInput)
 	duration := time.Since(started).Milliseconds()
 	if err != nil {
+		s.discardRowBackup(identity, backupAnnotations)
 		s.recordActivity(r, connection.ID, string(raw), "error", 0, duration, "", "", auditMeta{decision: "allow", errorMessage: err.Error()})
 		writeError(w, 502, "EXEC_ERROR", err.Error())
 		return
 	}
 	s.recordActivity(r, connection.ID, string(raw), "success", modified, duration, "", "", auditMeta{decision: "allow"})
-	writeJSON(w, 200, map[string]any{"matchedCount": matched, "modifiedCount": modified, "durationMs": duration})
+	writeJSON(w, 200, backupAnnotations.addTo(map[string]any{"matchedCount": matched, "modifiedCount": modified, "durationMs": duration}))
 }
 
 func (s *Server) mongoTxnDelete(w http.ResponseWriter, r *http.Request) {
@@ -207,7 +220,11 @@ func (s *Server) mongoTxnDelete(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var input engine.MongoDeleteInput
+	identity := identityFromContext(r.Context())
+	var input struct {
+		engine.MongoDeleteInput
+		Backup bool `json:"backup"`
+	}
 	if !decodeJSON(w, r, &input) {
 		return
 	}
@@ -237,16 +254,25 @@ func (s *Server) mongoTxnDelete(w http.ResponseWriter, r *http.Request) {
 	}()
 	item.mu.Lock()
 	defer item.mu.Unlock()
+	var backupAnnotations Annotations
+	if input.Backup {
+		backupAnnotations = s.mongoCaptureTxnBackup(identity, connection, item.transaction, connection.Database, input.Collection, "delete", string(raw), input.Filter)
+		if reason, ok := backupAnnotations["backupBlocked"].(string); ok {
+			writeError(w, http.StatusConflict, "BACKUP_UNAVAILABLE", reason)
+			return
+		}
+	}
 	started := time.Now()
-	deleted, err := item.transaction.DeleteOne(input)
+	deleted, err := item.transaction.DeleteOne(input.MongoDeleteInput)
 	duration := time.Since(started).Milliseconds()
 	if err != nil {
+		s.discardRowBackup(identity, backupAnnotations)
 		s.recordActivity(r, connection.ID, string(raw), "error", 0, duration, "", "", auditMeta{decision: "allow", errorMessage: err.Error()})
 		writeError(w, 502, "EXEC_ERROR", err.Error())
 		return
 	}
 	s.recordActivity(r, connection.ID, string(raw), "success", deleted, duration, "", "", auditMeta{decision: "allow"})
-	writeJSON(w, 200, map[string]any{"deletedCount": deleted, "durationMs": duration})
+	writeJSON(w, 200, backupAnnotations.addTo(map[string]any{"deletedCount": deleted, "durationMs": duration}))
 }
 
 func (s *Server) mongoCommitTransaction(w http.ResponseWriter, r *http.Request) {

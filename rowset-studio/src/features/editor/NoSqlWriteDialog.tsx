@@ -1,6 +1,14 @@
 import { useState } from "react";
-import { mongoInsert, mongoUpdate, mongoDelete, mongoTxnInsert, mongoTxnUpdate, mongoTxnDelete, redisWrite, redisDelete, elasticsearchIndex, elasticsearchUpdate, elasticsearchDelete } from "./api";
+import { mongoInsert, mongoUpdate, mongoDelete, mongoTxnInsert, mongoTxnUpdate, mongoTxnDelete, redisWrite, redisDelete, elasticsearchIndex, elasticsearchUpdate, elasticsearchDelete, type BackupNote } from "./api";
 import { ApiError } from "../../lib/api";
+import { rowBackupEnabled } from "../../lib/preferences";
+import { useShared } from "../../lib/instance";
+
+function backupSuffix(response: { backup?: BackupNote; backupSkipped?: string }): string {
+  if (response.backup) return ` Backed up ${response.backup.rows} document(s) first; restore from Activity → Row backups.`;
+  if (response.backupSkipped) return ` No backup was taken: ${response.backupSkipped}.`;
+  return "";
+}
 
 type Engine = "mongodb" | "redis" | "valkey" | "elasticsearch";
 type Mode = "insert" | "update" | "delete";
@@ -40,6 +48,8 @@ export default function NoSqlWriteDialog({ connectionId, engine, database, txnId
   const [field, setField] = useState("");
   const [value, setValue] = useState("");
   const [ttl, setTtl] = useState("");
+  const shared = useShared();
+  const backup = mode !== "insert" && !shared && rowBackupEnabled();
 
   async function run() {
     setBusy(true);
@@ -55,14 +65,14 @@ export default function NoSqlWriteDialog({ connectionId, engine, database, txnId
           setResult(`Inserted _id: ${JSON.stringify(response.id)}`);
         } else if (mode === "update") {
           const response = txnId
-            ? await mongoTxnUpdate(connectionId, txnId, { collection, filter: parseJSON("Filter", filter), update: parseJSON("Update", update) })
-            : await mongoUpdate(connectionId, { database, collection, filter: parseJSON("Filter", filter), update: parseJSON("Update", update) });
-          setResult(`Matched ${response.matchedCount}, modified ${response.modifiedCount}`);
+            ? await mongoTxnUpdate(connectionId, txnId, { collection, filter: parseJSON("Filter", filter), update: parseJSON("Update", update), backup })
+            : await mongoUpdate(connectionId, { database, collection, filter: parseJSON("Filter", filter), update: parseJSON("Update", update), backup });
+          setResult(`Matched ${response.matchedCount}, modified ${response.modifiedCount}.${backupSuffix(response)}`);
         } else {
           const response = txnId
-            ? await mongoTxnDelete(connectionId, txnId, { collection, filter: parseJSON("Filter", filter) })
-            : await mongoDelete(connectionId, { database, collection, filter: parseJSON("Filter", filter) });
-          setResult(`Deleted ${response.deletedCount}`);
+            ? await mongoTxnDelete(connectionId, txnId, { collection, filter: parseJSON("Filter", filter), backup })
+            : await mongoDelete(connectionId, { database, collection, filter: parseJSON("Filter", filter), backup });
+          setResult(`Deleted ${response.deletedCount}.${backupSuffix(response)}`);
         }
       } else if (engine === "elasticsearch") {
         if (!index.trim() || !id.trim()) throw new Error("Index and id are required");

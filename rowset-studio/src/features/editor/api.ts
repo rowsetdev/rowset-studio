@@ -209,12 +209,22 @@ export function mongoInsert(connectionId: string, request: { database?: string; 
   return api<{ id: unknown; durationMs: number }>(`/connections/${connectionId}/documents/insert`, { method: "POST", body: JSON.stringify(request) });
 }
 
-export function mongoUpdate(connectionId: string, request: { database?: string; collection: string; filter: unknown; update: unknown }) {
-  return api<{ matchedCount: number; modifiedCount: number; durationMs: number }>(`/connections/${connectionId}/documents/update`, { method: "POST", body: JSON.stringify(request) });
+export interface BackupNote {
+  id: string;
+  rows: number;
+}
+interface WithBackup {
+  backup?: BackupNote;
+  backupSkipped?: string;
+  backupBlocked?: string;
 }
 
-export function mongoDelete(connectionId: string, request: { database?: string; collection: string; filter: unknown }) {
-  return api<{ deletedCount: number; durationMs: number }>(`/connections/${connectionId}/documents/delete`, { method: "POST", body: JSON.stringify(request) });
+export function mongoUpdate(connectionId: string, request: { database?: string; collection: string; filter: unknown; update: unknown; backup?: boolean }) {
+  return api<{ matchedCount: number; modifiedCount: number; durationMs: number } & WithBackup>(`/connections/${connectionId}/documents/update`, { method: "POST", body: JSON.stringify(request) });
+}
+
+export function mongoDelete(connectionId: string, request: { database?: string; collection: string; filter: unknown; backup?: boolean }) {
+  return api<{ deletedCount: number; durationMs: number } & WithBackup>(`/connections/${connectionId}/documents/delete`, { method: "POST", body: JSON.stringify(request) });
 }
 
 // Manual-commit MongoDB writes: requires the server to be a replica set or
@@ -227,12 +237,12 @@ export function mongoTxnInsert(connectionId: string, txnId: string, request: { c
   return api<{ id: unknown; durationMs: number }>(`/connections/${connectionId}/documents/txn/${txnId}/insert`, { method: "POST", body: JSON.stringify(request) });
 }
 
-export function mongoTxnUpdate(connectionId: string, txnId: string, request: { collection: string; filter: unknown; update: unknown }) {
-  return api<{ matchedCount: number; modifiedCount: number; durationMs: number }>(`/connections/${connectionId}/documents/txn/${txnId}/update`, { method: "POST", body: JSON.stringify(request) });
+export function mongoTxnUpdate(connectionId: string, txnId: string, request: { collection: string; filter: unknown; update: unknown; backup?: boolean }) {
+  return api<{ matchedCount: number; modifiedCount: number; durationMs: number } & WithBackup>(`/connections/${connectionId}/documents/txn/${txnId}/update`, { method: "POST", body: JSON.stringify(request) });
 }
 
-export function mongoTxnDelete(connectionId: string, txnId: string, request: { collection: string; filter: unknown }) {
-  return api<{ deletedCount: number; durationMs: number }>(`/connections/${connectionId}/documents/txn/${txnId}/delete`, { method: "POST", body: JSON.stringify(request) });
+export function mongoTxnDelete(connectionId: string, txnId: string, request: { collection: string; filter: unknown; backup?: boolean }) {
+  return api<{ deletedCount: number; durationMs: number } & WithBackup>(`/connections/${connectionId}/documents/txn/${txnId}/delete`, { method: "POST", body: JSON.stringify(request) });
 }
 
 export function mongoCommitTxn(connectionId: string, txnId: string) {

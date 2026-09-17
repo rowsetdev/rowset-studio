@@ -5,6 +5,19 @@ and `scripts/package-macos.sh` stamp it into Studio (sidebar), the `rowset`
 executable and the macOS app. Every change set bumps the patch version and adds
 an entry here.
 
+## 0.0.92 — 2026-09-17
+
+- Added MongoDB row backups: an update/delete from the Write dialog (or
+  inside a manual transaction) can save the documents it is about to
+  change first, the same "back up before UPDATE/DELETE" preference SQL
+  writes already use. Activity → Row backups lists them with a Mongo shell
+  script for review and a one-click Restore, which re-inserts (for a
+  delete) or fully replaces by _id (for an update) — not a partial `$set`
+  replay, since that can't be inverted field by field. Restore runs
+  document by document rather than in one transaction, since MongoDB
+  transactions need a replica set. Verified against a live server end to
+  end, including clicking through Restore in the browser.
+
 ## 0.0.91 — 2026-09-17
 
 - Added pagination to the Activity statements table: 20 rows per page with

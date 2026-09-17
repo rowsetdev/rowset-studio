@@ -214,6 +214,45 @@ func mongoUpdateOneWith(ctx context.Context, client *mongo.Client, database stri
 	return result.MatchedCount, result.ModifiedCount, nil
 }
 
+// MongoReplaceInput is used only for row-backup restore: putting a document
+// back exactly as it was captured, not for general use, which is why it
+// skips MongoUpdateOne's "operators only" rule that protects hand-typed
+// writes from an accidental full-document replacement.
+type MongoReplaceInput struct {
+	Database   string          `json:"database"`
+	Collection string          `json:"collection"`
+	Filter     json.RawMessage `json:"filter"`
+	Document   json.RawMessage `json:"document"`
+}
+
+func (m *Manager) MongoReplaceOne(ctx context.Context, connection Connection, input MongoReplaceInput) error {
+	client, err := mongoClient(connection)
+	if err != nil {
+		return err
+	}
+	defer closeMongo(client)
+	return mongoReplaceOneWith(ctx, client, connection.Database, input)
+}
+
+func mongoReplaceOneWith(ctx context.Context, client *mongo.Client, database string, input MongoReplaceInput) error {
+	if strings.TrimSpace(input.Collection) == "" {
+		return errors.New("collection is required")
+	}
+	filter, err := ParseMongoFilter(input.Filter)
+	if err != nil {
+		return err
+	}
+	if !mongoHasPredicate(filter) {
+		return errors.New("replace requires a non-empty filter")
+	}
+	var document bson.D
+	if err := bson.UnmarshalExtJSON(input.Document, false, &document); err != nil {
+		return fmt.Errorf("document must be an Extended JSON object: %w", err)
+	}
+	_, err = client.Database(database).Collection(input.Collection).ReplaceOne(ctx, filter, document, options.Replace().SetUpsert(true))
+	return err
+}
+
 type MongoDeleteInput struct {
 	Database   string          `json:"database"`
 	Collection string          `json:"collection"`
@@ -315,6 +354,17 @@ func (t *MongoTransaction) UpdateOne(input MongoUpdateInput) (int64, int64, erro
 
 func (t *MongoTransaction) DeleteOne(input MongoDeleteInput) (int64, error) {
 	return mongoDeleteOneWith(t.sessCtx, t.client, t.database, input)
+}
+
+// FindMany reads inside the transaction's own session, for row-backup
+// capture: it must see the pre-write state consistently with the write that
+// follows it in the same transaction, not a separate connection's view.
+func (t *MongoTransaction) FindMany(input MongoFindInput) ([]json.RawMessage, bool, error) {
+	return mongoFindWith(t.sessCtx, t.client, t.database, input)
+}
+
+func (t *MongoTransaction) ReplaceOne(input MongoReplaceInput) error {
+	return mongoReplaceOneWith(t.sessCtx, t.client, t.database, input)
 }
 
 // Lock/Unlock pin one operation at a time to the transaction, the same
@@ -438,6 +488,15 @@ func (m *Manager) MongoAggregate(ctx context.Context, connection Connection, inp
 }
 
 func (m *Manager) MongoFind(ctx context.Context, connection Connection, input MongoFindInput) ([]json.RawMessage, bool, error) {
+	client, err := mongoClient(connection)
+	if err != nil {
+		return nil, false, err
+	}
+	defer closeMongo(client)
+	return mongoFindWith(ctx, client, connection.Database, input)
+}
+
+func mongoFindWith(ctx context.Context, client *mongo.Client, database string, input MongoFindInput) ([]json.RawMessage, bool, error) {
 	if strings.TrimSpace(input.Collection) == "" || strings.ContainsRune(input.Collection, 0) {
 		return nil, false, errors.New("collection is required")
 	}
@@ -471,11 +530,6 @@ func (m *Manager) MongoFind(ctx context.Context, connection Connection, input Mo
 	if input.Limit < 1 || input.Limit > 10000 {
 		return nil, false, errors.New("limit must be between 1 and 10000")
 	}
-	client, err := mongoClient(connection)
-	if err != nil {
-		return nil, false, err
-	}
-	defer closeMongo(client)
 	opts := options.Find().SetLimit(int64(input.Limit + 1))
 	if len(sort) > 0 {
 		opts.SetSort(sort)
@@ -491,7 +545,7 @@ func (m *Manager) MongoFind(ctx context.Context, connection Connection, input Mo
 		ctx, timeoutCancel = context.WithTimeout(ctx, time.Duration(input.MaxTimeMs)*time.Millisecond)
 		defer timeoutCancel()
 	}
-	cursor, err := client.Database(connection.Database).Collection(input.Collection).Find(ctx, filter, opts)
+	cursor, err := client.Database(database).Collection(input.Collection).Find(ctx, filter, opts)
 	if err != nil {
 		return nil, false, err
 	}
