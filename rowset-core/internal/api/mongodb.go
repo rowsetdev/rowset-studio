@@ -245,8 +245,19 @@ func (s *Server) mongoUpdate(w http.ResponseWriter, r *http.Request) {
 	if database == "" {
 		database = connection.Database
 	}
+	filter, err := engine.ParseMongoFilter(input.Filter)
+	if err != nil {
+		writeError(w, 400, "BAD_REQUEST", err.Error())
+		return
+	}
 	quote := func(v string) string { return `"` + strings.ReplaceAll(v, `"`, `""`) + `"` }
-	statement := "UPDATE " + quote(database) + "." + quote(input.Collection) + ` SET "document" = 'rowset' WHERE "__rowset_document_filter__" IS NOT NULL`
+	// Deliberately omitted, not a placeholder, when the filter has no
+	// predicate: an UPDATE with no WHERE is exactly what the "no
+	// UPDATE/DELETE without WHERE" guardrail exists to catch.
+	statement := "UPDATE " + quote(database) + "." + quote(input.Collection) + ` SET "document" = 'rowset'`
+	if mongoFilterHasPredicate(filter) {
+		statement += ` WHERE "__rowset_document_filter__" IS NOT NULL`
+	}
 	raw, _ := json.Marshal(input)
 	target, ctx, cancel, run := s.nosqlWriteGuard(w, r, connection, database, statement, string(raw))
 	if !run {
@@ -288,8 +299,16 @@ func (s *Server) mongoDelete(w http.ResponseWriter, r *http.Request) {
 	if database == "" {
 		database = connection.Database
 	}
+	filter, err := engine.ParseMongoFilter(input.Filter)
+	if err != nil {
+		writeError(w, 400, "BAD_REQUEST", err.Error())
+		return
+	}
 	quote := func(v string) string { return `"` + strings.ReplaceAll(v, `"`, `""`) + `"` }
-	statement := "DELETE FROM " + quote(database) + "." + quote(input.Collection) + ` WHERE "__rowset_document_filter__" IS NOT NULL`
+	statement := "DELETE FROM " + quote(database) + "." + quote(input.Collection)
+	if mongoFilterHasPredicate(filter) {
+		statement += ` WHERE "__rowset_document_filter__" IS NOT NULL`
+	}
 	raw, _ := json.Marshal(input)
 	target, ctx, cancel, run := s.nosqlWriteGuard(w, r, connection, database, statement, string(raw))
 	if !run {
