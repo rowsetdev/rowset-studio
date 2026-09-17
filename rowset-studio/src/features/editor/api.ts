@@ -204,7 +204,9 @@ export async function exportTable(connectionId: string, request: { database?: st
 // Document/key writes: MongoDB, Redis/Valkey and Elasticsearch have no SQL,
 // so these mirror the grid's UPDATE/DELETE actions with their own shape.
 export function mongoInsert(connectionId: string, request: { database?: string; collection: string; document: unknown }) {
-  return api<{ id: string; durationMs: number }>(`/connections/${connectionId}/documents/insert`, { method: "POST", body: JSON.stringify(request) });
+  // id is Extended JSON: an object for the common ObjectID case ({"$oid":"..."}),
+  // or a plain string/number when the document set its own _id.
+  return api<{ id: unknown; durationMs: number }>(`/connections/${connectionId}/documents/insert`, { method: "POST", body: JSON.stringify(request) });
 }
 
 export function mongoUpdate(connectionId: string, request: { database?: string; collection: string; filter: unknown; update: unknown }) {
@@ -213,6 +215,32 @@ export function mongoUpdate(connectionId: string, request: { database?: string; 
 
 export function mongoDelete(connectionId: string, request: { database?: string; collection: string; filter: unknown }) {
   return api<{ deletedCount: number; durationMs: number }>(`/connections/${connectionId}/documents/delete`, { method: "POST", body: JSON.stringify(request) });
+}
+
+// Manual-commit MongoDB writes: requires the server to be a replica set or
+// mongos; a standalone mongod's rejection surfaces as the begin call's error.
+export function mongoBeginTxn(connectionId: string, database?: string) {
+  return api<{ txnId: string }>(`/connections/${connectionId}/documents/txn/begin`, { method: "POST", body: JSON.stringify({ database: database ?? "" }) });
+}
+
+export function mongoTxnInsert(connectionId: string, txnId: string, request: { collection: string; document: unknown }) {
+  return api<{ id: unknown; durationMs: number }>(`/connections/${connectionId}/documents/txn/${txnId}/insert`, { method: "POST", body: JSON.stringify(request) });
+}
+
+export function mongoTxnUpdate(connectionId: string, txnId: string, request: { collection: string; filter: unknown; update: unknown }) {
+  return api<{ matchedCount: number; modifiedCount: number; durationMs: number }>(`/connections/${connectionId}/documents/txn/${txnId}/update`, { method: "POST", body: JSON.stringify(request) });
+}
+
+export function mongoTxnDelete(connectionId: string, txnId: string, request: { collection: string; filter: unknown }) {
+  return api<{ deletedCount: number; durationMs: number }>(`/connections/${connectionId}/documents/txn/${txnId}/delete`, { method: "POST", body: JSON.stringify(request) });
+}
+
+export function mongoCommitTxn(connectionId: string, txnId: string) {
+  return api<void>(`/connections/${connectionId}/documents/txn/${txnId}/commit`, { method: "POST" });
+}
+
+export function mongoRollbackTxn(connectionId: string, txnId: string) {
+  return api<void>(`/connections/${connectionId}/documents/txn/${txnId}/rollback`, { method: "POST" });
 }
 
 export function redisWrite(connectionId: string, request: { database?: string; key: string; type: "string" | "hash"; field?: string; value: string; ttlSeconds?: number }) {

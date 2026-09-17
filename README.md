@@ -42,18 +42,19 @@ encrypted in a local SQLite database.
 | SQLite | Absolute path to an existing file | SQL, transactions, schema, keys, indexes, DDL, CSV import/export, JSON export |
 | DuckDB | Absolute path to an existing file; CGO build | SQL, transactions, tables/views, DDL, CSV import/export, JSON export |
 | <img src="rowset-studio/src/assets/engines/clickhouse.svg" height="18" valign="middle"> ClickHouse | Native TCP: 9440 with TLS, 9000 without | SQL, databases, tables/views, DDL, CSV/JSON export, estimated plans |
-| <img src="rowset-studio/src/assets/engines/mongodb.svg" height="18" valign="middle"> MongoDB | Host/port; `authSource=admin` | Compass-style filter/project/sort/skip/limit query bar synced with `db.collection.find()`, `db.collection.aggregate([...])` read-only pipelines, document insert/update/delete |
+| <img src="rowset-studio/src/assets/engines/mongodb.svg" height="18" valign="middle"> MongoDB | Host/port; `authSource=admin` | Compass-style filter/project/sort/skip/limit query bar synced with `db.collection.find()`, `db.collection.aggregate([...])` read-only pipelines, document insert/update/delete, manual-commit transactions (replica set or mongos required) |
 | <img src="rowset-studio/src/assets/engines/redis.svg" height="18" valign="middle"> Redis | Host/port | Pattern/type scan bar, keys grouped by type as pseudo-tables, string/hash key writes and delete |
 | Valkey | Host/port | Redis-compatible pattern/type scan bar, key previews, string/hash key writes and delete |
 | <img src="rowset-studio/src/assets/engines/cassandra.svg" height="18" valign="middle"> Cassandra | Contact points, keyspace, TLS/SSH, consistency/paging | Governed CQL reads/writes/DDL/batches, schema/DDL, CSV import, CSV/JSON export, CQL `INSERT JSON` export for base tables without counters |
 | <img src="rowset-studio/src/assets/engines/elasticsearch.svg" height="18" valign="middle"> Elasticsearch | HTTP API host/port | Index/query/size search bar with `sort`/`search_after` pagination and `aggs`, index mapping browsing, document index/update/delete |
 
 MongoDB, Redis, Valkey and Elasticsearch writes are limited to single-document/key
-operations (no bulk APIs or transactions yet); MongoDB additionally has
-read-only aggregation pipelines. Cassandra uses governed CQL. Each has a
-query bar tailored to it — see
-[Additional databases](#additional-databases-and-schema-comparison) below for
-exact limits.
+operations (no bulk APIs yet); MongoDB additionally has read-only
+aggregation pipelines and manual-commit transactions (a replica set or
+mongos is required — a standalone server rejects the transaction with a
+clear error). Cassandra uses governed CQL. Each has a query bar tailored to
+it — see [Additional databases](#additional-databases-and-schema-comparison)
+below for exact limits.
 
 ## Features
 
@@ -119,8 +120,9 @@ MongoDB, Redis, Valkey and Elasticsearch support single-document/key
 insert, update and delete from the query toolbar's **Write** action, behind
 the same policy, read-only and audit rules as SQL writes. MongoDB also runs
 read-only `aggregate()` pipelines, with `$out`, `$merge`, `$lookup` and
-other writing/cross-collection/JavaScript stages rejected. Bulk APIs,
-transactions and SSH tunnels are not yet supported for any of the four, and
+other writing/cross-collection/JavaScript stages rejected, and manual-commit
+transactions (see above; MongoDB-only, requires a replica set or mongos).
+Bulk APIs and SSH tunnels are not yet supported for any of the four, and
 index/primary-key/foreign-key metadata is not loaded for any
 non-`database/sql` engine (SQLite, DuckDB, ClickHouse and these four).
 Inline grid editing remains available only for the SQL engines, since it's

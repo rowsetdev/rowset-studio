@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { mongoInsert, mongoUpdate, mongoDelete, redisWrite, redisDelete, elasticsearchIndex, elasticsearchUpdate, elasticsearchDelete } from "./api";
+import { mongoInsert, mongoUpdate, mongoDelete, mongoTxnInsert, mongoTxnUpdate, mongoTxnDelete, redisWrite, redisDelete, elasticsearchIndex, elasticsearchUpdate, elasticsearchDelete } from "./api";
 import { ApiError } from "../../lib/api";
 
 type Engine = "mongodb" | "redis" | "valkey" | "elasticsearch";
@@ -21,7 +21,7 @@ function parseJSON(label: string, text: string): unknown {
 // keys and Elasticsearch documents each get their own minimal form, backed
 // by the write endpoints that share the SQL guardrails (policy, read-only,
 // audit) with the grid's UPDATE/DELETE statements.
-export default function NoSqlWriteDialog({ connectionId, engine, database, onClose, onWritten }: { connectionId: string; engine: Engine; database: string; onClose: () => void; onWritten: () => void }) {
+export default function NoSqlWriteDialog({ connectionId, engine, database, txnId, onClose, onWritten }: { connectionId: string; engine: Engine; database: string; /** Open MongoDB transaction: writes join it instead of running standalone. */ txnId?: string; onClose: () => void; onWritten: () => void }) {
   const [mode, setMode] = useState<Mode>("insert");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -49,13 +49,19 @@ export default function NoSqlWriteDialog({ connectionId, engine, database, onClo
       if (engine === "mongodb") {
         if (!collection.trim()) throw new Error("Collection is required");
         if (mode === "insert") {
-          const response = await mongoInsert(connectionId, { database, collection, document: parseJSON("Document", document) });
-          setResult(`Inserted _id: ${response.id}`);
+          const response = txnId
+            ? await mongoTxnInsert(connectionId, txnId, { collection, document: parseJSON("Document", document) })
+            : await mongoInsert(connectionId, { database, collection, document: parseJSON("Document", document) });
+          setResult(`Inserted _id: ${JSON.stringify(response.id)}`);
         } else if (mode === "update") {
-          const response = await mongoUpdate(connectionId, { database, collection, filter: parseJSON("Filter", filter), update: parseJSON("Update", update) });
+          const response = txnId
+            ? await mongoTxnUpdate(connectionId, txnId, { collection, filter: parseJSON("Filter", filter), update: parseJSON("Update", update) })
+            : await mongoUpdate(connectionId, { database, collection, filter: parseJSON("Filter", filter), update: parseJSON("Update", update) });
           setResult(`Matched ${response.matchedCount}, modified ${response.modifiedCount}`);
         } else {
-          const response = await mongoDelete(connectionId, { database, collection, filter: parseJSON("Filter", filter) });
+          const response = txnId
+            ? await mongoTxnDelete(connectionId, txnId, { collection, filter: parseJSON("Filter", filter) })
+            : await mongoDelete(connectionId, { database, collection, filter: parseJSON("Filter", filter) });
           setResult(`Deleted ${response.deletedCount}`);
         }
       } else if (engine === "elasticsearch") {
@@ -102,6 +108,7 @@ export default function NoSqlWriteDialog({ connectionId, engine, database, onClo
           <h2 className="text-[13px] font-medium">Write {engine === "mongodb" ? "document" : engine === "elasticsearch" ? "document" : "key"}</h2>
           <button className="text-[12px] text-slate-500 hover:text-slate-800 dark:hover:text-slate-200" onClick={onClose}>Close</button>
         </div>
+        {txnId && <p className="rounded bg-amber-50 px-2 py-1 text-[11px] text-amber-800 dark:bg-amber-950 dark:text-amber-300">Joins the open transaction — nothing is saved until you Commit.</p>}
         <div className="flex gap-1.5">{modes.map((m) => <button key={m.key} className={tabClass(mode === m.key)} onClick={() => { setMode(m.key); setError(""); setResult(""); }}>{m.label}</button>)}</div>
 
         {engine === "mongodb" && <input className={inputClass} placeholder="Collection" value={collection} onChange={(e) => setCollection(e.target.value)} />}

@@ -31,6 +31,7 @@ export interface WorkspaceStatus {
 
 export default function RunToolbar({
   connectionId,
+  mongoTxnId,
   onConnectionChange,
   onRun,
   onRunAll,
@@ -65,6 +66,8 @@ export default function RunToolbar({
   autoRefreshEligible,
 }: {
   connectionId: string | null;
+  /** The open MongoDB transaction's id, when manual commit began one. */
+  mongoTxnId?: string;
   onConnectionChange: (id: string | null) => void;
   onRun: () => void;
   onRunAll: () => void;
@@ -215,6 +218,7 @@ export default function RunToolbar({
             connectionId={current.id}
             engine={current.engine as "mongodb" | "redis" | "valkey" | "elasticsearch"}
             database={database || current.database}
+            txnId={isMongo ? mongoTxnId : undefined}
             onClose={() => setWriting(false)}
             onWritten={onRun}
           />

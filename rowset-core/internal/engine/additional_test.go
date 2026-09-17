@@ -204,6 +204,32 @@ func TestLiveAdditionalServers(t *testing.T) {
 				if _, _, err := m.MongoFind(ctx, c, MongoFindInput{Collection: "items", Filter: json.RawMessage(`{}`), Skip: -1, Limit: 10}); err == nil {
 					t.Fatal("expected a negative skip to be rejected")
 				}
+				// bson.MarshalExtJSON errors on a bare scalar like an
+				// InsertedID ("positioned on a TopLevel"); a prior bug
+				// swallowed that error and returned "" instead of failing,
+				// so the id must be checked for real content, not just a
+				// nil error.
+				docID, err := m.MongoInsertOne(ctx, c, MongoInsertInput{Collection: "rowset_insert_probe", Document: json.RawMessage(`{"x":1}`)})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if docID == "" || !json.Valid([]byte(docID)) {
+					t.Fatalf("insert returned an unusable id: %q", docID)
+				}
+				var idDoc struct {
+					OID string `json:"$oid"`
+				}
+				if err := json.Unmarshal([]byte(docID), &idDoc); err != nil || idDoc.OID == "" {
+					t.Fatalf("insert id is not an ObjectID: %q (err=%v)", docID, err)
+				}
+				matched, modified, err := m.MongoUpdateOne(ctx, c, MongoUpdateInput{Collection: "rowset_insert_probe", Filter: json.RawMessage(`{"x":1}`), Update: json.RawMessage(`{"$set":{"x":2}}`)})
+				if err != nil || matched != 1 || modified != 1 {
+					t.Fatalf("update: matched=%d modified=%d err=%v", matched, modified, err)
+				}
+				deleted, err := m.MongoDeleteOne(ctx, c, MongoDeleteInput{Collection: "rowset_insert_probe", Filter: json.RawMessage(`{"x":2}`)})
+				if err != nil || deleted != 1 {
+					t.Fatalf("delete: deleted=%d err=%v", deleted, err)
+				}
 			}
 		})
 	}

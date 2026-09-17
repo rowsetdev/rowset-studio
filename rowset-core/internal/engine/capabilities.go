@@ -34,7 +34,12 @@ func EngineCapabilities(name string) Capabilities {
 		return Capabilities{Explain: true, DDL: true, CSVExport: true, JSONExport: true, SSH: true}
 	case "cassandra":
 		return Capabilities{DDL: true, CSVImport: true, CSVExport: true, JSONExport: true, CQLExport: true, SSH: true, Shared: true, MultiNode: true}
-	case "mongodb", "elasticsearch":
+	case "mongodb":
+		// Transactions require a replica set or mongos; a standalone
+		// mongod rejects the first write inside one with a clear driver
+		// error, surfaced as-is rather than hidden behind this flag.
+		return Capabilities{Transactions: true, DocumentWrite: true}
+	case "elasticsearch":
 		return Capabilities{DocumentWrite: true}
 	case "redis", "valkey":
 		return Capabilities{KeyWrite: true}

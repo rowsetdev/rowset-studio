@@ -241,6 +241,7 @@ func (s *Server) reapIdleTransactions() {
 		_ = item.transaction.Rollback()
 		item.mu.Unlock()
 	}
+	s.reapIdleMongoTransactions(now)
 }
 
 func (s *Server) closeConnectionTransactions(connectionID string) {
@@ -258,6 +259,7 @@ func (s *Server) closeConnectionTransactions(connectionID string) {
 		_ = item.transaction.Rollback()
 		item.mu.Unlock()
 	}
+	s.closeConnectionMongoTransactions(connectionID)
 }
 func (s *Server) transactionReaper(ctx context.Context) {
 	ticker := time.NewTicker(time.Minute)

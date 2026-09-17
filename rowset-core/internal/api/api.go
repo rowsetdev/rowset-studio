@@ -35,6 +35,8 @@ type Server struct {
 	engines             *engine.Manager
 	txnMu               sync.Mutex
 	txns                map[string]*transactionEntry
+	mongoTxnMu          sync.Mutex
+	mongoTxns           map[string]*mongoTxnEntry
 	stopTransactions    context.CancelFunc
 	topologyMu          sync.Mutex
 	topologyLocks       map[string]*sync.Mutex
@@ -71,7 +73,7 @@ func NewWithActivity(cfg config.Config, data *store.Store, activityStore activit
 	secretVault, _ := vault.New(cfg.EncryptionKey, cfg.EncryptionKeyPrevious)
 	txnContext, cancel := context.WithCancel(context.Background())
 	topologyContext, stopTopology := context.WithCancel(context.Background())
-	server := &Server{config: cfg, store: data, activity: activityStore, issuer: issuer, logger: logger, vault: secretVault, engines: engine.NewManager(), txns: make(map[string]*transactionEntry), stopTransactions: cancel, topologyLocks: make(map[string]*sync.Mutex), stopTopology: stopTopology, rateClients: make(map[string]*rateWindow)}
+	server := &Server{config: cfg, store: data, activity: activityStore, issuer: issuer, logger: logger, vault: secretVault, engines: engine.NewManager(), txns: make(map[string]*transactionEntry), mongoTxns: make(map[string]*mongoTxnEntry), stopTransactions: cancel, topologyLocks: make(map[string]*sync.Mutex), stopTopology: stopTopology, rateClients: make(map[string]*rateWindow)}
 	go server.transactionReaper(txnContext)
 	go server.topologyRefresher(topologyContext)
 	retentionContext, stopRetention := context.WithCancel(context.Background())
@@ -112,6 +114,18 @@ func (s *Server) Close() error {
 	}
 	s.txnMu.Unlock()
 	for _, item := range items {
+		item.mu.Lock()
+		_ = item.transaction.Rollback()
+		item.mu.Unlock()
+	}
+	s.mongoTxnMu.Lock()
+	mongoItems := make([]*mongoTxnEntry, 0, len(s.mongoTxns))
+	for id, item := range s.mongoTxns {
+		mongoItems = append(mongoItems, item)
+		delete(s.mongoTxns, id)
+	}
+	s.mongoTxnMu.Unlock()
+	for _, item := range mongoItems {
 		item.mu.Lock()
 		_ = item.transaction.Rollback()
 		item.mu.Unlock()
@@ -168,6 +182,12 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/connections/{id}/documents/insert", s.authenticated(http.HandlerFunc(s.mongoInsert)))
 	mux.Handle("POST /api/connections/{id}/documents/update", s.authenticated(http.HandlerFunc(s.mongoUpdate)))
 	mux.Handle("POST /api/connections/{id}/documents/delete", s.authenticated(http.HandlerFunc(s.mongoDelete)))
+	mux.Handle("POST /api/connections/{id}/documents/txn/begin", s.authenticated(http.HandlerFunc(s.mongoBeginTransaction)))
+	mux.Handle("POST /api/connections/{id}/documents/txn/{txn_id}/insert", s.authenticated(http.HandlerFunc(s.mongoTxnInsert)))
+	mux.Handle("POST /api/connections/{id}/documents/txn/{txn_id}/update", s.authenticated(http.HandlerFunc(s.mongoTxnUpdate)))
+	mux.Handle("POST /api/connections/{id}/documents/txn/{txn_id}/delete", s.authenticated(http.HandlerFunc(s.mongoTxnDelete)))
+	mux.Handle("POST /api/connections/{id}/documents/txn/{txn_id}/commit", s.authenticated(http.HandlerFunc(s.mongoCommitTransaction)))
+	mux.Handle("POST /api/connections/{id}/documents/txn/{txn_id}/rollback", s.authenticated(http.HandlerFunc(s.mongoRollbackTransaction)))
 	mux.Handle("POST /api/connections/{id}/redis/scan", s.authenticated(http.HandlerFunc(s.redisScan)))
 	mux.Handle("POST /api/connections/{id}/redis/write", s.authenticated(http.HandlerFunc(s.redisWrite)))
 	mux.Handle("POST /api/connections/{id}/redis/delete", s.authenticated(http.HandlerFunc(s.redisDelete)))

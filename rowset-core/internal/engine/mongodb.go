@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -122,6 +123,15 @@ type MongoInsertInput struct {
 
 // MongoInsertOne inserts one document, returning its _id as Extended JSON.
 func (m *Manager) MongoInsertOne(ctx context.Context, connection Connection, input MongoInsertInput) (string, error) {
+	client, err := mongoClient(connection)
+	if err != nil {
+		return "", err
+	}
+	defer closeMongo(client)
+	return mongoInsertOneWith(ctx, client, connection.Database, input)
+}
+
+func mongoInsertOneWith(ctx context.Context, client *mongo.Client, database string, input MongoInsertInput) (string, error) {
 	if strings.TrimSpace(input.Collection) == "" {
 		return "", errors.New("collection is required")
 	}
@@ -129,20 +139,30 @@ func (m *Manager) MongoInsertOne(ctx context.Context, connection Connection, inp
 	if err := bson.UnmarshalExtJSON(input.Document, false, &document); err != nil {
 		return "", fmt.Errorf("document must be an Extended JSON object: %w", err)
 	}
-	client, err := mongoClient(connection)
+	result, err := client.Database(database).Collection(input.Collection).InsertOne(ctx, document)
 	if err != nil {
 		return "", err
 	}
-	defer closeMongo(client)
-	result, err := client.Database(connection.Database).Collection(input.Collection).InsertOne(ctx, document)
+	return marshalExtJSONValue(result.InsertedID)
+}
+
+// marshalExtJSONValue Extended-JSON-encodes a single BSON value (as opposed
+// to a whole document). bson.MarshalExtJSON only writes documents; asked to
+// write a bare scalar like an ObjectID at the top level, the value writer
+// errors ("... positioned on a TopLevel") instead of producing JSON, so the
+// value is wrapped in a one-field document and unwrapped again here.
+func marshalExtJSONValue(value any) (string, error) {
+	wrapped, err := bson.MarshalExtJSON(bson.D{{Key: "v", Value: value}}, true, false)
 	if err != nil {
 		return "", err
 	}
-	id, err := bson.MarshalExtJSON(result.InsertedID, true, false)
-	if err != nil {
-		return "", nil
+	var parsed struct {
+		V json.RawMessage `json:"v"`
 	}
-	return string(id), nil
+	if err := json.Unmarshal(wrapped, &parsed); err != nil {
+		return "", err
+	}
+	return string(parsed.V), nil
 }
 
 type MongoUpdateInput struct {
@@ -156,6 +176,15 @@ type MongoUpdateInput struct {
 // the first document matching filter. A full-document replacement is
 // rejected: every operator update stays reviewable field by field.
 func (m *Manager) MongoUpdateOne(ctx context.Context, connection Connection, input MongoUpdateInput) (int64, int64, error) {
+	client, err := mongoClient(connection)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer closeMongo(client)
+	return mongoUpdateOneWith(ctx, client, connection.Database, input)
+}
+
+func mongoUpdateOneWith(ctx context.Context, client *mongo.Client, database string, input MongoUpdateInput) (int64, int64, error) {
 	if strings.TrimSpace(input.Collection) == "" {
 		return 0, 0, errors.New("collection is required")
 	}
@@ -178,12 +207,7 @@ func (m *Manager) MongoUpdateOne(ctx context.Context, connection Connection, inp
 			return 0, 0, errors.New("update must use operators such as $set, $unset or $inc; a full-document replacement is not supported")
 		}
 	}
-	client, err := mongoClient(connection)
-	if err != nil {
-		return 0, 0, err
-	}
-	defer closeMongo(client)
-	result, err := client.Database(connection.Database).Collection(input.Collection).UpdateOne(ctx, filter, update)
+	result, err := client.Database(database).Collection(input.Collection).UpdateOne(ctx, filter, update)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -198,6 +222,15 @@ type MongoDeleteInput struct {
 
 // MongoDeleteOne removes the first document matching filter.
 func (m *Manager) MongoDeleteOne(ctx context.Context, connection Connection, input MongoDeleteInput) (int64, error) {
+	client, err := mongoClient(connection)
+	if err != nil {
+		return 0, err
+	}
+	defer closeMongo(client)
+	return mongoDeleteOneWith(ctx, client, connection.Database, input)
+}
+
+func mongoDeleteOneWith(ctx context.Context, client *mongo.Client, database string, input MongoDeleteInput) (int64, error) {
 	if strings.TrimSpace(input.Collection) == "" {
 		return 0, errors.New("collection is required")
 	}
@@ -208,12 +241,7 @@ func (m *Manager) MongoDeleteOne(ctx context.Context, connection Connection, inp
 	if !mongoHasPredicate(filter) {
 		return 0, errors.New("delete requires a non-empty filter")
 	}
-	client, err := mongoClient(connection)
-	if err != nil {
-		return 0, err
-	}
-	defer closeMongo(client)
-	result, err := client.Database(connection.Database).Collection(input.Collection).DeleteOne(ctx, filter)
+	result, err := client.Database(database).Collection(input.Collection).DeleteOne(ctx, filter)
 	if err != nil {
 		return 0, err
 	}
@@ -232,6 +260,93 @@ func mongoHasPredicate(filter bson.D) bool {
 		}
 	}
 	return false
+}
+
+// MongoTransaction pins one client and session across several document
+// writes. MongoDB only accepts a transaction number on a replica set member
+// or mongos; a standalone mongod rejects the first operation inside it with
+// a clear driver error ("Transaction numbers are only allowed on a replica
+// set member or mongos"), which callers should surface as-is rather than
+// translate, since it already explains the fix.
+type MongoTransaction struct {
+	client   *mongo.Client
+	session  *mongo.Session
+	sessCtx  context.Context
+	cancel   context.CancelFunc
+	database string
+	finish   sync.Once
+	finished bool
+	mu       sync.Mutex
+}
+
+// MongoBegin starts a session and a transaction on it.
+func (m *Manager) MongoBegin(ctx context.Context, connection Connection) (*MongoTransaction, error) {
+	client, err := mongoClient(connection)
+	if err != nil {
+		return nil, err
+	}
+	session, err := client.StartSession()
+	if err != nil {
+		closeMongo(client)
+		return nil, err
+	}
+	if err := session.StartTransaction(); err != nil {
+		session.EndSession(context.Background())
+		closeMongo(client)
+		return nil, err
+	}
+	lifetime, cancel := context.WithCancel(context.Background())
+	return &MongoTransaction{
+		client:   client,
+		session:  session,
+		sessCtx:  mongo.NewSessionContext(lifetime, session),
+		cancel:   cancel,
+		database: connection.Database,
+	}, nil
+}
+
+func (t *MongoTransaction) InsertOne(input MongoInsertInput) (string, error) {
+	return mongoInsertOneWith(t.sessCtx, t.client, t.database, input)
+}
+
+func (t *MongoTransaction) UpdateOne(input MongoUpdateInput) (int64, int64, error) {
+	return mongoUpdateOneWith(t.sessCtx, t.client, t.database, input)
+}
+
+func (t *MongoTransaction) DeleteOne(input MongoDeleteInput) (int64, error) {
+	return mongoDeleteOneWith(t.sessCtx, t.client, t.database, input)
+}
+
+// Lock/Unlock pin one operation at a time to the transaction, the same
+// serialization the SQL Transaction type gets from its own connection.
+func (t *MongoTransaction) Lock()   { t.mu.Lock() }
+func (t *MongoTransaction) Unlock() { t.mu.Unlock() }
+
+func (t *MongoTransaction) close() {
+	t.finish.Do(func() {
+		t.finished = true
+		t.session.EndSession(context.Background())
+		t.cancel()
+		closeMongo(t.client)
+	})
+}
+
+func (t *MongoTransaction) Commit() error {
+	if t.finished {
+		return errors.New("transaction already finished")
+	}
+	err := t.session.CommitTransaction(context.Background())
+	t.close()
+	return err
+}
+
+func (t *MongoTransaction) Rollback() error {
+	if t.finished {
+		return nil
+	}
+	err := t.session.AbortTransaction(context.Background())
+	t.close()
+	return err
 }
 
 type MongoAggregateInput struct {

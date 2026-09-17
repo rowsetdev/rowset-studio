@@ -5,6 +5,23 @@ and `scripts/package-macos.sh` stamp it into Studio (sidebar), the `rowset`
 executable and the macOS app. Every change set bumps the patch version and adds
 an entry here.
 
+## 0.0.90 — 2026-09-17
+
+- Added MongoDB manual-commit transactions: the toolbar's manual-commit
+  toggle begins a session/transaction, the Write dialog's insert/update/
+  delete join it, and Commit/Rollback end it — same UI as SQL engines.
+  Requires a replica set or mongos; a standalone server's rejection surfaces
+  as the begin call's error.
+- Fixed: MongoDB document insert returned an empty, unusable `_id` in its
+  response (`bson.MarshalExtJSON` errors on a bare scalar value like an
+  ObjectID; the error was silently swallowed). Found via manual browser
+  testing of the transaction feature above, not a directed check — none of
+  the existing tests asserted on the returned id's content, only that the
+  call didn't error. Fixed and covered by a new regression check.
+- ClickHouse's Go driver silently no-ops `Rollback()` — a transaction
+  "succeeds" without reverting anything. Confirmed live and left disabled;
+  MongoDB got the same check and passed for genuine (replica-set) support.
+
 ## 0.0.89 — 2026-09-17
 
 - Added an Aggregate mode to the MongoDB query bar: a Find/Aggregate toggle

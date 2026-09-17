@@ -15,7 +15,7 @@ import RunToolbar, { type WorkspaceStatus } from "./RunToolbar";
 import SaveToNotebookDialog from "../notebooks/SaveToNotebookDialog";
 import PlanPanel, { type PlanState } from "../plan/PlanPanel";
 import ExplorerPanel from "./ExplorerPanel";
-import { explainQuery, exportTable, getSchema, listDatabases, runOnConnections, runQuery, beginTxn, txnQuery, commitTxn, rollbackTxn, type QueryResult, type SchemaInfo } from "./api";
+import { explainQuery, exportTable, getSchema, listDatabases, runOnConnections, runQuery, beginTxn, txnQuery, commitTxn, rollbackTxn, mongoBeginTxn, mongoCommitTxn, mongoRollbackTxn, type QueryResult, type SchemaInfo } from "./api";
 import { buildSqlCompletions } from "./sqlCompletions";
 import { useSchema } from "./useEditor";
 import { formatSql, statementAt, splitStatements } from "./sqlText";
@@ -762,6 +762,10 @@ function EditorWorkspace({ snapshot, initial }: { snapshot: WorkspaceSnapshot; i
     if (transactions.current[tabId] || controllers.current[tabId] || scripts.current[tabId] || transactionOperations.current.has(tabId)) return;
     manualCommit.current = { ...manualCommit.current, [tabId]: manual };
     setManualCommitTabs(manualCommit.current);
+    // Mongo has no "run a statement" trigger to begin on (writes come from
+    // the Write dialog, not the Run button), so manual commit begins the
+    // transaction immediately instead of on first use.
+    if (manual && isMongo) { void transactionAction("begin"); return; }
     setActiveMessage(manual ? "Manual commit: the next statement starts a transaction. Nothing is saved until you press Commit." : "Auto-commit: each statement is saved as soon as it succeeds.", false);
   }
 
@@ -772,21 +776,32 @@ function EditorWorkspace({ snapshot, initial }: { snapshot: WorkspaceSnapshot; i
     try {
       const tx = transactions.current[activeTabId];
       if (action === "begin" && !tx) {
-        const result = await beginTxn(activeConnectionId, selectedDb);
+        const result = isMongo ? await mongoBeginTxn(activeConnectionId, selectedDb) : await beginTxn(activeConnectionId, selectedDb);
         if (!mounted.current) {
-          await rollbackTxn(activeConnectionId, result.txnId);
+          await (isMongo ? mongoRollbackTxn(activeConnectionId, result.txnId) : rollbackTxn(activeConnectionId, result.txnId));
           return;
         }
         transactions.current[activeTabId] = { id: result.txnId, connectionId: activeConnectionId, database: selectedDb };
         setTransactionIDs(current => ({ ...current, [activeTabId]: result.txnId }));
       } else if (tx && action !== "begin") {
-        await (action === "commit" ? commitTxn(tx.connectionId, tx.id) : rollbackTxn(tx.connectionId, tx.id));
+        await (isMongo
+          ? (action === "commit" ? mongoCommitTxn(tx.connectionId, tx.id) : mongoRollbackTxn(tx.connectionId, tx.id))
+          : (action === "commit" ? commitTxn(tx.connectionId, tx.id) : rollbackTxn(tx.connectionId, tx.id)));
         forgetTransaction(activeTabId);
       }
       setActiveMessage(action === "begin" ? "Transaction open. Changes require Commit; close or Rollback to discard." : `Transaction ${action} completed.${manualCommit.current[activeTabId] ? " Still in manual commit; the next statement starts a new transaction." : ""}`, false);
     } catch (error) {
       if (error instanceof ApiError && ["TXN_NOT_FOUND", "TXN_FINISH_ERROR", "TXN_LOST", "TXN_ROLLED_BACK"].includes(error.body.code)) forgetTransaction(activeTabId);
-      if (mounted.current) setActiveMessage(error instanceof Error ? error.message : "Transaction failed", true);
+      if (mounted.current) {
+        setActiveMessage(error instanceof Error ? error.message : "Transaction failed", true);
+        // A failed begin (e.g. a standalone mongod rejecting the
+        // transaction) must not leave manual commit on with nothing to
+        // Commit/Rollback.
+        if (isMongo && action === "begin") {
+          manualCommit.current = { ...manualCommit.current, [activeTabId]: false };
+          setManualCommitTabs(manualCommit.current);
+        }
+      }
     }
     finally { transactionOperations.current.delete(activeTabId); if (mounted.current) setTransactionBusy(transactionOperations.current.size > 0); }
   }
@@ -930,6 +945,7 @@ function EditorWorkspace({ snapshot, initial }: { snapshot: WorkspaceSnapshot; i
         )}
         <RunToolbar
           connectionId={activeConnectionId}
+          mongoTxnId={isMongo ? transactionIDs[activeTabId] : undefined}
           onConnectionChange={onConnectionChange}
           onRun={onRun}
           onOpenFile={() => fileInput.current?.click()}
