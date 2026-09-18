@@ -1,8 +1,0 @@
-{"Time":"2026-09-16T22:08:47.64134+03:00","Action":"start","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine"}
-{"Time":"2026-09-16T22:08:48.681337+03:00","Action":"run","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Test":"TestLiveElasticsearch"}
-{"Time":"2026-09-16T22:08:48.682466+03:00","Action":"output","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Test":"TestLiveElasticsearch","Output":"=== RUN   TestLiveElasticsearch\n"}
-{"Time":"2026-09-16T22:08:49.295273+03:00","Action":"output","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Test":"TestLiveElasticsearch","Output":"--- PASS: TestLiveElasticsearch (0.62s)\n"}
-{"Time":"2026-09-16T22:08:49.295293+03:00","Action":"pass","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Test":"TestLiveElasticsearch","Elapsed":0.62}
-{"Time":"2026-09-16T22:08:49.29609+03:00","Action":"output","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Output":"PASS\n"}
-{"Time":"2026-09-16T22:08:49.296383+03:00","Action":"output","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Output":"ok  \tgithub.com/dbaopsio/rowset-studio/rowset-core/internal/engine\t1.649s\n"}
-{"Time":"2026-09-16T22:08:49.296401+03:00","Action":"pass","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Elapsed":1.655}

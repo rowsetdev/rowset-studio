@@ -1,8 +1,0 @@
-{"Time":"2026-09-16T22:07:59.004878+03:00","Action":"start","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine"}
-{"Time":"2026-09-16T22:07:59.980998+03:00","Action":"run","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Test":"TestLiveRedis"}
-{"Time":"2026-09-16T22:07:59.9811+03:00","Action":"output","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Test":"TestLiveRedis","Output":"=== RUN   TestLiveRedis\n"}
-{"Time":"2026-09-16T22:08:00.015268+03:00","Action":"output","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Test":"TestLiveRedis","Output":"--- PASS: TestLiveRedis (0.03s)\n"}
-{"Time":"2026-09-16T22:08:00.015294+03:00","Action":"pass","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Test":"TestLiveRedis","Elapsed":0.03}
-{"Time":"2026-09-16T22:08:00.015318+03:00","Action":"output","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Output":"PASS\n"}
-{"Time":"2026-09-16T22:08:00.016536+03:00","Action":"output","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Output":"ok  \tgithub.com/dbaopsio/rowset-studio/rowset-core/internal/engine\t1.011s\n"}
-{"Time":"2026-09-16T22:08:00.016559+03:00","Action":"pass","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Elapsed":1.012}

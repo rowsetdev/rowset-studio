@@ -293,13 +293,11 @@ node --experimental-strip-types rowset-studio/scripts/bench-grid.mjs
 Live engine tests run against real database servers and are skipped unless
 their credentials are set:
 
-The [client audit](reports/database-client-audit-2026-09-17.md) (predates the
-Snowflake removal below) records which operations were verified live and
-which remain unverified. To repeat its
-container and file-engine probes one engine at a time, run
-`python3 scripts/audit/run.py all` from the repository root. Image digests are
-locked in `scripts/audit/images.lock.json`; JSON evidence is written under
-`reports/audit-evidence/`.
+`python3 scripts/audit/run.py all` runs each engine's container and
+file-engine probes one at a time from the repository root, to record which
+operations are verified live and which remain unverified. Image digests
+are locked in `scripts/audit/images.lock.json`; JSON evidence is written
+under `reports/audit-evidence/`.
 
 | Engine | Variables |
 | --- | --- |

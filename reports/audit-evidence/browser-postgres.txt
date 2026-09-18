@@ -1,5 +1,0 @@
-
-> rowset-studio@0.0.86 test:e2e:postgres
-> node e2e/postgres.mjs
-
-PostgreSQL browser E2E passed: grid edit, cancel/recover, database restart/reconnect

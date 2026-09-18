@@ -5,6 +5,15 @@ and `scripts/package-macos.sh` stamp it into Studio (sidebar), the `rowset`
 executable and the macOS app. Every change set bumps the patch version and adds
 an entry here.
 
+## 0.0.97 — 2026-09-18
+
+- Removed: `reports/database-client-audit-2026-09-17.md` and its
+  `reports/audit-evidence/` — the report predated this session's
+  Snowflake removal (still listed it as a live finding) and its
+  MongoDB/Redis/Valkey/Elasticsearch write rows were marked unimplemented,
+  which this session's row-backup work made false. `scripts/audit/run.py`
+  still works to produce a fresh one.
+
 ## 0.0.96 — 2026-09-18
 
 - Added: row backups for Redis/Valkey and Elasticsearch, completing row

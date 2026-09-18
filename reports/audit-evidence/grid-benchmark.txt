@@ -1,4 +1,0 @@
-all rows: median 3 ms; result 100000
-text filter: median 6 ms; result 190
-numeric sort baseline: median 444 ms; result 100000
-numeric sort prepared: median 76 ms; result 100000

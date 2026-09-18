@@ -1,7 +1,0 @@
-
-> rowset-studio@0.0.86 test:e2e
-> node e2e/desktop.mjs
-
-desktop ready
-fixture created
-Browser E2E passed: desktop sign-in, connection, query, transaction rollback, tab open/close; SQLite grid editing is unavailable

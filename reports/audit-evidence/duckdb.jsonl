@@ -1,8 +1,0 @@
-{"Time":"2026-09-16T22:06:36.588282+03:00","Action":"start","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine"}
-{"Time":"2026-09-16T22:06:37.57967+03:00","Action":"run","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Test":"TestDuckDBQuerySchemaDDLAndPrecision"}
-{"Time":"2026-09-16T22:06:37.579771+03:00","Action":"output","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Test":"TestDuckDBQuerySchemaDDLAndPrecision","Output":"=== RUN   TestDuckDBQuerySchemaDDLAndPrecision\n"}
-{"Time":"2026-09-16T22:06:37.612855+03:00","Action":"output","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Test":"TestDuckDBQuerySchemaDDLAndPrecision","Output":"--- PASS: TestDuckDBQuerySchemaDDLAndPrecision (0.03s)\n"}
-{"Time":"2026-09-16T22:06:37.612874+03:00","Action":"pass","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Test":"TestDuckDBQuerySchemaDDLAndPrecision","Elapsed":0.03}
-{"Time":"2026-09-16T22:06:37.612884+03:00","Action":"output","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Output":"PASS\n"}
-{"Time":"2026-09-16T22:06:37.613874+03:00","Action":"output","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Output":"ok  \tgithub.com/dbaopsio/rowset-studio/rowset-core/internal/engine\t1.025s\n"}
-{"Time":"2026-09-16T22:06:37.613886+03:00","Action":"pass","Package":"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine","Elapsed":1.026}
