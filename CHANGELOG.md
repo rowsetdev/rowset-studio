@@ -5,6 +5,43 @@ and `scripts/package-macos.sh` stamp it into Studio (sidebar), the `rowset`
 executable and the macOS app. Every change set bumps the patch version and adds
 an entry here.
 
+## 0.0.101 — 2026-09-19
+
+- Fixed: the SSH tunnel of a MongoDB, Redis/Valkey or Elasticsearch
+  connection was dropped on save — the form showed the SSH section for these
+  engines but still cleared its host before sending, so the connection was
+  saved without a tunnel.
+- Fixed: the WHERE guardrails (`deny_select_without_where`,
+  `deny_update_without_where`, `deny_delete_without_where`) could be
+  bypassed with a quoted identifier named like a keyword, e.g.
+  `DELETE FROM t AS "where"` or `SELECT * FROM secrets AS "where"`. Quoted
+  identifiers are no longer read as keywords anywhere in WHERE detection.
+  A column compared with a literal (`NOT id = 5`) is also no longer taken as
+  a constant, which had made such filtered writes look unfiltered.
+- Fixed: in a MongoDB manual transaction begun on a database other than the
+  connection's default, policies were evaluated — and row backups recorded
+  — against the default database instead of the one being written, so a
+  per-database policy did not apply and Restore targeted the wrong database.
+- Fixed: restoring an UPDATE row backup reported success while restoring
+  nothing when a backed-up row no longer existed under its key (it was
+  deleted, or the UPDATE changed the key). The restore now stops, rolls
+  back and says so; restoring values a row already holds still succeeds,
+  including on MySQL, which counts only changed rows.
+- Fixed: Redis/Valkey bulk writes reported total failure with 0 writes
+  when one command failed, although the others had been written. A hash
+  write onto an existing non-hash key is now refused before anything runs,
+  and any other server-side failure reports how many writes went through.
+- Fixed: the MongoDB, Redis and Elasticsearch query bars kept their fields
+  from the previous query when the editor text changed in the same tab
+  (history pick, typing in the editor); editing a field then rebuilt the old
+  query over the new one. The bars now re-read any change they did not make.
+- Fixed: SQL-format exports (and scheduled SQL exports) rounded
+  floating-point values to 6 decimal places; they now keep the exact value.
+- Fixed: a deferred statement run for its author ignored the row limit of
+  a `limit_rows` policy while reading its result.
+- Changed: the macOS release downloads (archives and app) now include
+  DuckDB; Linux and Windows downloads still omit it.
+
 ## 0.0.100 — 2026-09-18
 
 - Fixed: exporting a binary/blob/bit column to SQL format (or a scheduled SQL

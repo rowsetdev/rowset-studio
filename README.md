@@ -42,7 +42,7 @@ encrypted in a local SQLite database.
 | <img src="rowset-studio/src/assets/engines/mssql.svg" height="18" valign="middle"> SQL Server | Host/port or URL, SSH tunnel | SQL editor, DDL, CSV import, row editing, schema compare, estimated and actual plans |
 | <img src="rowset-studio/src/assets/engines/cockroachdb.svg" height="18" valign="middle"> CockroachDB | Host/port (PostgreSQL wire protocol) | SQL editor, transactions, DDL, CSV import/export, row editing, estimated and actual plans |
 | SQLite | Absolute path to an existing file | SQL, transactions, schema, keys, indexes, DDL, CSV import/export, JSON export |
-| DuckDB | Absolute path to an existing file; CGO build | SQL, transactions, tables/views, DDL, CSV import/export, JSON export |
+| DuckDB | Absolute path to an existing file; CGO build (macOS downloads, local builds) | SQL, transactions, tables/views, DDL, CSV import/export, JSON export |
 | <img src="rowset-studio/src/assets/engines/clickhouse.svg" height="18" valign="middle"> ClickHouse | Native TCP: 9440 with TLS, 9000 without | SQL, databases, tables/views, DDL, CSV/JSON export, estimated plans |
 | <img src="rowset-studio/src/assets/engines/mongodb.svg" height="18" valign="middle"> MongoDB | Host/port, SSH tunnel; `authSource=admin` | Compass-style filter/project/sort/skip/limit query bar synced with `db.collection.find()`, `db.collection.aggregate([...])` read-only pipelines, document insert/update/delete with row backups, manual-commit transactions (replica set or mongos required) |
 | <img src="rowset-studio/src/assets/engines/redis.svg" height="18" valign="middle"> Redis | Host/port, SSH tunnel | Pattern/type scan bar, keys grouped by type as pseudo-tables, string/hash key writes and delete with row backups |
@@ -149,10 +149,11 @@ shown in the run result. Query each engine's own tools
 directly for operations Rowset doesn't cover yet.
 
 Native `build-local-binary.sh` builds include DuckDB and require a working
-C/C++ compiler. `CGO_ENABLED=0` builds, including the portable
-cross-platform release script, omit DuckDB; the UI only offers it when the
-server includes it. Cross-compiling with DuckDB requires a C/C++ toolchain
-for the target platform.
+C/C++ compiler. Release downloads include DuckDB on macOS (both the
+archives and the app); the Linux and Windows downloads are `CGO_ENABLED=0`
+builds without it, and the UI only offers DuckDB when the server includes
+it. Cross-compiling with DuckDB requires a C/C++ toolchain for the target
+platform.
 
 ## Query results and parameters
 

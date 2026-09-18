@@ -116,7 +116,7 @@ func (s *Server) ExecuteDeferred(r *http.Request, statement DeferredStatement) D
 		}
 		defer stream.Close()
 		var rows int64
-		for {
+		for rowLimit <= 0 || rows < int64(rowLimit) {
 			_, ok, err := stream.Next()
 			if err != nil {
 				record(rows, stream.DurationMS(), false, "error", err.Error())

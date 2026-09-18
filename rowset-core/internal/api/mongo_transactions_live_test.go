@@ -125,4 +125,42 @@ func TestLiveMongoTransactionAPIRollbackAndCommit(t *testing.T) {
 	if count := findCount(); count != 1 {
 		t.Fatalf("commit did not persist via the API: %d docs", count)
 	}
+
+	// A transaction begun on another database writes there, and its row
+	// backup names that database, not the connection's default one.
+	w = httptest.NewRecorder()
+	r = personalRequest(identity, `{"database":"rowset_api_tx_other"}`)
+	r.SetPathValue("id", connID)
+	s.mongoBeginTransaction(w, r)
+	var other struct {
+		TxnID string `json:"txnId"`
+	}
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &other) != nil {
+		t.Fatalf("begin on another database: %d %s", w.Code, w.Body.String())
+	}
+	insert(other.TxnID, fmt.Sprintf(`{"collection":%q,"document":{"x":3}}`, collection))
+	w = httptest.NewRecorder()
+	r = personalRequest(identity, fmt.Sprintf(`{"collection":%q,"filter":{"x":3},"update":{"$set":{"x":4}},"backup":true}`, collection))
+	r.SetPathValue("id", connID)
+	r.SetPathValue("txn_id", other.TxnID)
+	s.mongoTxnUpdate(w, r)
+	if w.Code != 200 {
+		t.Fatalf("update on another database: %d %s", w.Code, w.Body.String())
+	}
+	list := httptest.NewRecorder()
+	s.listRowBackups(list, personalRequest(identity, ""))
+	var listed struct {
+		Backups []struct{ Database string }
+	}
+	if json.Unmarshal(list.Body.Bytes(), &listed) != nil || len(listed.Backups) == 0 || listed.Backups[0].Database != "rowset_api_tx_other" {
+		t.Fatalf("backup database: %s", list.Body.String())
+	}
+	w = httptest.NewRecorder()
+	r = personalRequest(identity, `{}`)
+	r.SetPathValue("id", connID)
+	r.SetPathValue("txn_id", other.TxnID)
+	s.mongoRollbackTransaction(w, r)
+	if w.Code != 204 {
+		t.Fatalf("rollback on another database: %d %s", w.Code, w.Body.String())
+	}
 }

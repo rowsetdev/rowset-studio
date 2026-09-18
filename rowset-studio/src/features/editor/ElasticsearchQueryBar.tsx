@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export function elasticsearchQuery() {
   return `{"index":"","query":{"match_all":{}},"size":100}`;
@@ -44,11 +44,15 @@ function toSql(parts: EsParts): string {
 export default function ElasticsearchQueryBar({ tabKey, sql, onChange, onRun }: { tabKey: string; sql: string; onChange: (sql: string) => void; onRun: () => void }) {
   const [parts, setParts] = useState<EsParts>({ index: "", query: '{"match_all":{}}', size: "100", rest: {} });
 
+  // The text this bar last wrote; any other change (tab switch, typing in
+  // the editor, a history pick) is re-read into the fields.
+  const written = useRef<{ tab: string; sql: string } | null>(null);
   useEffect(() => {
+    if (written.current?.tab === tabKey && written.current.sql === sql) return;
     try { setParts(toParts(sql)); } catch { /* keep last valid parts while the JSON is mid-edit */ }
-  }, [tabKey]);
+  }, [tabKey, sql]);
 
-  const commit = (next: EsParts) => { setParts(next); onChange(toSql(next)); };
+  const commit = (next: EsParts) => { setParts(next); const text = toSql(next); written.current = { tab: tabKey, sql: text }; onChange(text); };
 
   return (
     <div className="flex items-center gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900/40">

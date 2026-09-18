@@ -261,49 +261,87 @@ type RedisBulkWriteInput struct {
 
 // RedisBulkWrite runs several string/hash writes in one pipeline (up to
 // 10,000), the same "no bulk APIs" limit row backups and CSV import use.
-// Every write is validated before any of them run, so a bad entry never
-// leaves some keys written and others not.
-func (m *Manager) RedisBulkWrite(ctx context.Context, connection Connection, input RedisBulkWriteInput) error {
+// Every write is validated before any of them run, including that no hash
+// write targets an existing key of another type, so a bad entry never leaves
+// some keys written and others not. A write that still fails on the server
+// does not stop the others; the error then says how many were written.
+func (m *Manager) RedisBulkWrite(ctx context.Context, connection Connection, input RedisBulkWriteInput) (int, error) {
 	if len(input.Writes) == 0 {
-		return errors.New("at least one write is required")
+		return 0, errors.New("at least one write is required")
 	}
 	if len(input.Writes) > 10000 {
-		return errors.New("at most 10000 writes can run at once")
+		return 0, errors.New("at most 10000 writes can run at once")
 	}
 	for i, write := range input.Writes {
 		if strings.TrimSpace(write.Key) == "" {
-			return fmt.Errorf("write %d: key is required", i+1)
+			return 0, fmt.Errorf("write %d: key is required", i+1)
 		}
 		if write.TTLSeconds < 0 {
-			return fmt.Errorf("write %d: ttlSeconds must be zero or positive", i+1)
+			return 0, fmt.Errorf("write %d: ttlSeconds must be zero or positive", i+1)
 		}
 		if write.Type == "hash" && strings.TrimSpace(write.Field) == "" {
-			return fmt.Errorf("write %d: field is required for hash writes", i+1)
+			return 0, fmt.Errorf("write %d: field is required for hash writes", i+1)
 		}
 		if write.Type != "string" && write.Type != "hash" {
-			return fmt.Errorf("write %d: writing a %q key is not supported yet; only string and hash are", i+1, write.Type)
+			return 0, fmt.Errorf("write %d: writing a %q key is not supported yet; only string and hash are", i+1, write.Type)
 		}
 	}
 	client, cleanup, err := redisClient(ctx, connection)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer cleanup()
+	// SET replaces a key of any type, but HSET fails on a non-hash key.
+	types := make([]*goredis.StatusCmd, len(input.Writes))
+	if _, err := client.Pipelined(ctx, func(pipe goredis.Pipeliner) error {
+		for i, write := range input.Writes {
+			if write.Type == "hash" {
+				types[i] = pipe.Type(ctx, write.Key)
+			}
+		}
+		return nil
+	}); err != nil {
+		return 0, err
+	}
+	for i, command := range types {
+		if command != nil && command.Val() != "none" && command.Val() != "hash" {
+			return 0, fmt.Errorf("write %d: key %q holds a %s, not a hash; nothing was written", i+1, input.Writes[i].Key, command.Val())
+		}
+	}
+	writes := make([][]goredis.Cmder, len(input.Writes))
 	_, err = client.Pipelined(ctx, func(pipe goredis.Pipeliner) error {
-		for _, write := range input.Writes {
+		for i, write := range input.Writes {
 			switch write.Type {
 			case "string":
-				pipe.Set(ctx, write.Key, write.Value, time.Duration(write.TTLSeconds)*time.Second)
+				writes[i] = append(writes[i], pipe.Set(ctx, write.Key, write.Value, time.Duration(write.TTLSeconds)*time.Second))
 			case "hash":
-				pipe.HSet(ctx, write.Key, write.Field, write.Value)
+				writes[i] = append(writes[i], pipe.HSet(ctx, write.Key, write.Field, write.Value))
 				if write.TTLSeconds > 0 {
-					pipe.Expire(ctx, write.Key, time.Duration(write.TTLSeconds)*time.Second)
+					writes[i] = append(writes[i], pipe.Expire(ctx, write.Key, time.Duration(write.TTLSeconds)*time.Second))
 				}
 			}
 		}
 		return nil
 	})
-	return err
+	if err == nil {
+		return len(input.Writes), nil
+	}
+	written, failed := 0, -1
+	for i, commands := range writes {
+		ok := len(commands) > 0
+		for _, command := range commands {
+			ok = ok && command.Err() == nil
+		}
+		if ok {
+			written++
+		} else if failed < 0 {
+			failed = i
+		}
+	}
+	if failed < 0 || written == 0 {
+		return written, err
+	}
+	return written, fmt.Errorf("%d of %d writes were written; write %d failed: %w", written, len(input.Writes), failed+1, err)
 }
 
 type RedisDeleteInput struct {

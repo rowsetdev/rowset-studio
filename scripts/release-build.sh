@@ -51,7 +51,17 @@ build_target() {
   mkdir -p "$dir"
   (
     cd "$WORK/src/rowset-core"
-    CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -p "$PACKAGE_JOBS" -trimpath -ldflags="-s -w -X main.version=$VERSION" -o "$dir/$exe" ./cmd/rowset
+    # A macOS host builds both macOS targets with CGO, which includes DuckDB;
+    # the other targets stay portable non-CGO builds without it.
+    cgo=0
+    if [ "$os" = darwin ] && [ "$(uname -s)" = Darwin ]; then
+      cgo=1
+      clang_arch=$arch
+      [ "$arch" = amd64 ] && clang_arch=x86_64
+      export CC="clang -arch $clang_arch" CXX="clang++ -arch $clang_arch"
+      export CGO_CFLAGS="-mmacosx-version-min=12.0" CGO_CXXFLAGS="-mmacosx-version-min=12.0" CGO_LDFLAGS="-mmacosx-version-min=12.0"
+    fi
+    CGO_ENABLED=$cgo GOOS=$os GOARCH=$arch go build -p "$PACKAGE_JOBS" -trimpath -ldflags="-s -w -X main.version=$VERSION" -o "$dir/$exe" ./cmd/rowset
   )
   cp "$ROOT_DIR/README.md" "$ROOT_DIR/CHANGELOG.md" "$dir/"
   [ -f "$ROOT_DIR/LICENSE" ] && cp "$ROOT_DIR/LICENSE" "$dir/"

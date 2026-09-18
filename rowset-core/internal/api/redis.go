@@ -172,10 +172,10 @@ func (s *Server) redisBulkWrite(w http.ResponseWriter, r *http.Request) {
 	}
 	defer cancel()
 	started := time.Now()
-	err := s.engines.RedisBulkWrite(ctx, target, input)
+	written, err := s.engines.RedisBulkWrite(ctx, target, input)
 	duration := time.Since(started).Milliseconds()
 	if err != nil {
-		s.recordActivity(r, connection.ID, string(raw), "error", 0, duration, "", "", auditMeta{decision: "allow", errorMessage: err.Error()})
+		s.recordActivity(r, connection.ID, string(raw), "error", int64(written), duration, "", "", auditMeta{decision: "allow", errorMessage: err.Error()})
 		writeError(w, 502, "EXEC_ERROR", err.Error())
 		return
 	}

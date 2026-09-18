@@ -115,6 +115,21 @@ func TestTautologicalWhereDoesNotBypassWriteGuard(t *testing.T) {
 	}
 }
 
+func TestQuotedIdentifiersAreNotKeywords(t *testing.T) {
+	for _, sql := range []string{`select * from secrets as "where"`, `delete from t as "where"`, "delete from t as `where`", `update t as [where] set a = 1`, `delete from t where "x" = 1 or 1=1`, `delete from t where "limit" is null or 1=1`} {
+		info, err := Parse(sql)
+		if err != nil || info.HasWhere {
+			t.Fatalf("%q bypassed the WHERE guard: %#v %v", sql, info, err)
+		}
+	}
+	for _, sql := range []string{`delete from t where "true"`, `delete from t where not id = 5`, `delete from t where not (a = 1 or b = 2)`, `update t set "delete" = 1 where id = 2`} {
+		info, err := Parse(sql)
+		if err != nil || !info.HasWhere {
+			t.Fatalf("%q was incorrectly treated as unfiltered: %#v %v", sql, info, err)
+		}
+	}
+}
+
 func TestDialectCorpusKeepsRiskClassificationStable(t *testing.T) {
 	tests := []struct {
 		engine string

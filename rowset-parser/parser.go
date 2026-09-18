@@ -67,7 +67,16 @@ type Token struct {
 	Start, End int
 	Depth      int
 	Identifier bool
+	// Quoted marks a quoted identifier ("where", `where`, [where]): its Lower
+	// is the bare name, so it must never be read as a keyword.
+	Quoted bool
 }
+
+// keyword reports whether the token is the unquoted keyword word.
+func (t Token) keyword(word string) bool { return !t.Quoted && t.Lower == word }
+
+// reservedWord reports whether the token is an unquoted clause keyword.
+func (t Token) reservedWord() bool { return !t.Quoted && reserved[t.Lower] }
 
 func Parse(sql string) (Info, error) {
 	return ParseDialect(DialectGeneric, sql)
@@ -162,7 +171,7 @@ func parseDialect(dialect Dialect, sql string) (Info, error) {
 		info.Command = info.Kind
 	}
 	for _, token := range tokens {
-		if token.Depth == 0 && token.Lower == "where" {
+		if token.Depth == 0 && token.keyword("where") {
 			info.HasWhere = true
 			break
 		}
@@ -245,11 +254,11 @@ func whereIsTautology(tokens []Token) bool {
 	start := -1
 	var expression []Token
 	for index, token := range tokens {
-		if token.Lower == "where" && token.Depth == 0 && start < 0 {
+		if token.keyword("where") && token.Depth == 0 && start < 0 {
 			start = index + 1
 			continue
 		}
-		if start >= 0 && token.Depth == 0 && reserved[token.Lower] && token.Lower != "where" {
+		if start >= 0 && token.Depth == 0 && token.reservedWord() && token.Lower != "where" {
 			break
 		}
 		if start >= 0 && index >= start {
@@ -272,7 +281,7 @@ func constantBoolean(tokens []Token) (bool, bool) {
 		found, allKnown, result := false, true, operator == "and"
 		start := 0
 		for index := 0; index <= len(tokens); index++ {
-			if index < len(tokens) && (tokens[index].Depth != depth || tokens[index].Lower != operator) {
+			if index < len(tokens) && (tokens[index].Depth != depth || !tokens[index].keyword(operator)) {
 				continue
 			}
 			if index == len(tokens) && !found {
@@ -297,7 +306,7 @@ func constantBoolean(tokens []Token) (bool, bool) {
 			return false, false
 		}
 	}
-	if len(tokens) == 1 {
+	if len(tokens) == 1 && !tokens[0].Quoted {
 		switch tokens[0].Lower {
 		case "true":
 			return true, true
@@ -305,7 +314,7 @@ func constantBoolean(tokens []Token) (bool, bool) {
 			return true, false
 		}
 	}
-	if len(tokens) >= 2 && tokens[0].Lower == "not" {
+	if len(tokens) >= 2 && tokens[0].keyword("not") {
 		known, value := constantBoolean(tokens[1:])
 		return known, !value
 	}
@@ -313,7 +322,15 @@ func constantBoolean(tokens []Token) (bool, bool) {
 		left, right, operator := tokens[0].Text, tokens[2].Text, tokens[1].Text
 		switch operator {
 		case "=":
-			return true, strings.EqualFold(left, right)
+			// Equal only when it holds on every row: the same column on both
+			// sides, or two literals. A column against a literal is unknown.
+			if strings.EqualFold(left, right) {
+				return true, true
+			}
+			if literalToken(left) && literalToken(right) {
+				return true, false
+			}
+			return false, false
 		case "!", "<": // lexer splits != and <> into two tokens; handled below.
 		}
 		leftNumber, leftErr := strconv.ParseFloat(left, 64)
@@ -414,7 +431,7 @@ func tokenKind(value string) (Kind, bool) {
 func writesHaveEffectiveWhere(tokens []Token) bool {
 	found := false
 	for index, token := range tokens {
-		if token.Lower != "update" && token.Lower != "merge" && token.Lower != "delete" || index > 0 && tokens[index-1].Lower == "for" {
+		if !token.keyword("update") && !token.keyword("merge") && !token.keyword("delete") || index > 0 && tokens[index-1].keyword("for") {
 			continue
 		}
 		found = true
@@ -424,7 +441,7 @@ func writesHaveEffectiveWhere(tokens []Token) bool {
 			if candidate.Depth < token.Depth {
 				break
 			}
-			if candidate.Depth == token.Depth && candidate.Lower == "where" {
+			if candidate.Depth == token.Depth && candidate.keyword("where") {
 				where = next
 				break
 			}
@@ -439,7 +456,7 @@ func writesHaveEffectiveWhere(tokens []Token) bool {
 func whereAtDepthIsTautology(tokens []Token, depth int) bool {
 	expression := make([]Token, 0, len(tokens))
 	for _, token := range tokens {
-		if token.Depth < depth || token.Depth == depth && reserved[token.Lower] {
+		if token.Depth < depth || token.Depth == depth && token.reservedWord() {
 			break
 		}
 		expression = append(expression, token)
@@ -655,7 +672,7 @@ func LexDialect(dialect Dialect, sql string) ([]Token, error) {
 			}
 			i++
 			text := sql[start:i]
-			out = append(out, Token{Text: text, Lower: strings.ToLower(strings.Trim(text, "\"`[]")), Start: start, End: i, Depth: depth, Identifier: true})
+			out = append(out, Token{Text: text, Lower: strings.ToLower(strings.Trim(text, "\"`[]")), Start: start, End: i, Depth: depth, Identifier: true, Quoted: true})
 			continue
 		}
 		if isIdent(sql[i]) {

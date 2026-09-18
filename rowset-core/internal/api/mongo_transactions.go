@@ -22,8 +22,11 @@ type mongoTxnEntry struct {
 	mu                   sync.Mutex
 	transaction          *engine.MongoTransaction
 	userID, connectionID string
-	lastUsed             time.Time
-	running              int
+	// database is the one the transaction was begun on; every write in it
+	// goes there, so policies and backups name it too.
+	database string
+	lastUsed time.Time
+	running  int
 }
 
 func (s *Server) mongoBeginTransaction(w http.ResponseWriter, r *http.Request) {
@@ -79,7 +82,7 @@ func (s *Server) mongoBeginTransaction(w http.ResponseWriter, r *http.Request) {
 	}
 	txnID := id.New()
 	s.mongoTxnMu.Lock()
-	s.mongoTxns[txnID] = &mongoTxnEntry{transaction: transaction, userID: identity.UserID, connectionID: connection.ID, lastUsed: time.Now()}
+	s.mongoTxns[txnID] = &mongoTxnEntry{transaction: transaction, userID: identity.UserID, connectionID: connection.ID, database: target.Database, lastUsed: time.Now()}
 	s.mongoTxnMu.Unlock()
 	writeJSON(w, 200, map[string]string{"txnId": txnID})
 }
@@ -119,7 +122,7 @@ func (s *Server) mongoTxnInsert(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "BAD_REQUEST", "collection is required")
 		return
 	}
-	info := nosqlStatement(sqlguard.Insert, connection.Database, input.Collection, false)
+	info := nosqlStatement(sqlguard.Insert, item.database, input.Collection, false)
 	raw, _ := json.Marshal(input)
 	if _, allowed := s.nosqlPolicyAllowed(w, r, connection, info, string(raw)); !allowed {
 		return
@@ -174,7 +177,7 @@ func (s *Server) mongoTxnUpdate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "BAD_REQUEST", err.Error())
 		return
 	}
-	info := nosqlStatement(sqlguard.Update, connection.Database, input.Collection, mongoFilterHasPredicate(filter))
+	info := nosqlStatement(sqlguard.Update, item.database, input.Collection, mongoFilterHasPredicate(filter))
 	raw, _ := json.Marshal(input)
 	if _, allowed := s.nosqlPolicyAllowed(w, r, connection, info, string(raw)); !allowed {
 		return
@@ -192,7 +195,7 @@ func (s *Server) mongoTxnUpdate(w http.ResponseWriter, r *http.Request) {
 	defer item.mu.Unlock()
 	var backupAnnotations Annotations
 	if input.Backup {
-		backupAnnotations = s.mongoCaptureTxnBackup(identity, connection, item.transaction, connection.Database, input.Collection, "update", string(raw), input.Filter)
+		backupAnnotations = s.mongoCaptureTxnBackup(identity, connection, item.transaction, item.database, input.Collection, "update", string(raw), input.Filter)
 		if reason, ok := backupAnnotations["backupBlocked"].(string); ok {
 			writeError(w, http.StatusConflict, "BACKUP_UNAVAILABLE", reason)
 			return
@@ -238,7 +241,7 @@ func (s *Server) mongoTxnDelete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "BAD_REQUEST", err.Error())
 		return
 	}
-	info := nosqlStatement(sqlguard.Delete, connection.Database, input.Collection, mongoFilterHasPredicate(filter))
+	info := nosqlStatement(sqlguard.Delete, item.database, input.Collection, mongoFilterHasPredicate(filter))
 	raw, _ := json.Marshal(input)
 	if _, allowed := s.nosqlPolicyAllowed(w, r, connection, info, string(raw)); !allowed {
 		return
@@ -256,7 +259,7 @@ func (s *Server) mongoTxnDelete(w http.ResponseWriter, r *http.Request) {
 	defer item.mu.Unlock()
 	var backupAnnotations Annotations
 	if input.Backup {
-		backupAnnotations = s.mongoCaptureTxnBackup(identity, connection, item.transaction, connection.Database, input.Collection, "delete", string(raw), input.Filter)
+		backupAnnotations = s.mongoCaptureTxnBackup(identity, connection, item.transaction, item.database, input.Collection, "delete", string(raw), input.Filter)
 		if reason, ok := backupAnnotations["backupBlocked"].(string); ok {
 			writeError(w, http.StatusConflict, "BACKUP_UNAVAILABLE", reason)
 			return

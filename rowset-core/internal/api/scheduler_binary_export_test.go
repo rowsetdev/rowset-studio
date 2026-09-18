@@ -34,3 +34,15 @@ func TestSqlValueLiteralOrdinaryStringUnaffected(t *testing.T) {
 		t.Errorf("sqlValueLiteral(ordinary string) = %q, want %q", got, want)
 	}
 }
+
+// A float must survive an SQL export → reimport round trip exactly.
+func TestSqlValueLiteralKeepsFloatPrecision(t *testing.T) {
+	for _, tc := range []struct {
+		value any
+		want  string
+	}{{1234.123456789, "1234.123456789"}, {float32(0.1), "0.1"}, {1e-9, "0.000000001"}, {-2.5, "-2.5"}, {3.0, "3"}} {
+		if got := sqlValueLiteral("postgres", tc.value); got != tc.want {
+			t.Errorf("sqlValueLiteral(%v) = %q, want %q", tc.value, got, tc.want)
+		}
+	}
+}

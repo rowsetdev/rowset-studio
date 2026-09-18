@@ -108,6 +108,31 @@ func TestLiveRowBackupRestoresUpdateAndDelete(t *testing.T) {
 				t.Fatalf("delete restore:\nwant %s\ngot  %s", before, got)
 			}
 
+			apply := func(result map[string]any) *httptest.ResponseRecorder {
+				t.Helper()
+				r := personalRequest(identity, "")
+				r.SetPathValue("id", result["backup"].(map[string]any)["id"].(string))
+				w := httptest.NewRecorder()
+				s.applyRowBackup(w, r)
+				return w
+			}
+			// Restoring values the row already holds is not a missing row,
+			// even where the engine counts only changed rows.
+			unchanged := query("UPDATE " + table + " SET amount = amount WHERE id = 3")
+			if w := apply(unchanged); w.Code != http.StatusOK {
+				t.Fatalf("restore of unchanged row: %d %s", w.Code, w.Body.String())
+			}
+			// An update that moved a row's key leaves nothing under the
+			// backed-up key; the restore says so and changes nothing.
+			moved := query("UPDATE " + table + " SET id = 30, name = 'moved' WHERE id = 3")
+			if w := apply(moved); w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "RESTORE_ROW_MISSING") {
+				t.Fatalf("restore of moved row: %d %s", w.Code, w.Body.String())
+			}
+			if names := fmt.Sprint(query("SELECT name FROM " + table + " WHERE id = 30")["rows"]); names != "[[moved]]" {
+				t.Fatalf("refused restore changed the row: %s", names)
+			}
+			query("UPDATE " + table + " SET id = 3, name = 'keep' WHERE id = 30")
+
 			// Without the option nothing is backed up.
 			if w := importCall(t, s, identity, s.runQuery, "POST", connection.ID, "", `{"sql":"UPDATE `+table+` SET amount = amount WHERE id = 3"}`); w.Code != http.StatusOK || strings.Contains(w.Body.String(), "backup") {
 				t.Fatalf("backup without the option: %d %s", w.Code, w.Body.String())
@@ -134,7 +159,7 @@ func TestLiveRowBackupRestoresUpdateAndDelete(t *testing.T) {
 			list := httptest.NewRecorder()
 			s.listRowBackups(list, personalRequest(identity, ""))
 			var listed struct{ Backups []map[string]any }
-			if json.Unmarshal(list.Body.Bytes(), &listed) != nil || len(listed.Backups) != 4 {
+			if json.Unmarshal(list.Body.Bytes(), &listed) != nil || len(listed.Backups) != 7 {
 				t.Fatalf("backups: %s", list.Body.String())
 			}
 		})

@@ -146,6 +146,20 @@ func TestLiveRedis(t *testing.T) {
 			t.Fatalf("missing type %s in scan results: %#v", want, types)
 		}
 	}
+	// A hash write onto a string key is refused before anything is written.
+	client.Del(ctx, "rowset:probe:bulk")
+	bulk := RedisBulkWriteInput{Database: "0", Writes: []RedisWriteInput{{Type: "string", Key: "rowset:probe:bulk", Value: "v"}, {Type: "hash", Key: "rowset:probe:string", Field: "f", Value: "v"}}}
+	if written, err := NewManager().RedisBulkWrite(ctx, c, bulk); err == nil || written != 0 || !strings.Contains(err.Error(), "not a hash") {
+		t.Fatalf("mismatched bulk write: %d %v", written, err)
+	}
+	if n, _ := client.Exists(ctx, "rowset:probe:bulk").Result(); n != 0 {
+		t.Fatal("refused bulk write left a key behind")
+	}
+	bulk.Writes[1].Key = "rowset:probe:hash"
+	if written, err := NewManager().RedisBulkWrite(ctx, c, bulk); err != nil || written != 2 {
+		t.Fatalf("bulk write: %d %v", written, err)
+	}
+	client.Del(ctx, "rowset:probe:bulk")
 	dbs, err := redisDatabases(ctx, c)
 	if err != nil {
 		t.Fatal(err)

@@ -147,7 +147,7 @@ export default function ConnectionForm({
     try {
       const first = form.nodes[0];
       const base = first ? { ...form, host: first.host, port: first.port } : { ...form };
-      if (!sshEnabled || fileEngine || ["mongodb", "redis", "valkey", "elasticsearch"].includes(form.engine)) { base.sshHost = ""; }
+      if (!sshEnabled || fileEngine) { base.sshHost = ""; }
       if (fileEngine) { base.nodes = []; base.tlsMode = "disable"; base.tlsCaPem = ""; base.tlsServerName = ""; base.tlsClientCertPem = ""; base.tlsClientKey = ""; }
       const input = { ...base, ...extra };
       if (connection) await update.mutateAsync({ id: connection.id, input });

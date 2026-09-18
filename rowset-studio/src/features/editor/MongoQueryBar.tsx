@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Icon } from "../../components/Icon";
 import {
   isMongoAggregateQuery,
@@ -19,15 +19,19 @@ const modeTab = (active: boolean) => `h-7 rounded-md px-2.5 text-[12px] font-med
 
 // A Compass-style bar for find() and a plain pipeline editor for
 // aggregate(), kept in sync with the raw db.collection.find()/aggregate()
-// editor below it: typing here rewrites the editor text, and switching tabs
-// or mode re-reads the editor text into these fields.
+// editor below it: typing here rewrites the editor text, and any other change
+// to that text (switching tabs, typing in the editor, a history pick) is
+// re-read into these fields.
 export default function MongoQueryBar({ tabKey, sql, onChange, onRun }: { tabKey: string; sql: string; onChange: (sql: string) => void; onRun: () => void }) {
   const [parts, setParts] = useState<MongoQueryParts>(EMPTY);
   const [aggregateParts, setAggregateParts] = useState<MongoAggregateParts>(EMPTY_AGGREGATE);
   const [aggregate, setAggregate] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const written = useRef<{ tab: string; sql: string } | null>(null);
+  const write = (next: string) => { written.current = { tab: tabKey, sql: next }; onChange(next); };
 
   useEffect(() => {
+    if (written.current?.tab === tabKey && written.current.sql === sql) return;
     const isAggregate = isMongoAggregateQuery(sql);
     setAggregate(isAggregate);
     if (isAggregate) {
@@ -40,22 +44,20 @@ export default function MongoQueryBar({ tabKey, sql, onChange, onRun }: { tabKey
     } catch {
       setParts((current) => ({ ...current, collection: current.collection || "collection" }));
     }
-    // Only re-read the editor when switching tabs, so typing in the editor
-    // itself does not fight the bar's own edits.
-  }, [tabKey]);
+  }, [tabKey, sql]);
 
   const commit = (next: MongoQueryParts) => {
     setParts(next);
-    onChange(mongoPartsToShell(next));
+    write(mongoPartsToShell(next));
   };
   const commitAggregate = (next: MongoAggregateParts) => {
     setAggregateParts(next);
-    onChange(mongoAggregatePartsToShell(next));
+    write(mongoAggregatePartsToShell(next));
   };
   const switchMode = (next: boolean) => {
     setAggregate(next);
-    if (next) { setAggregateParts((current) => ({ ...current, collection: current.collection || parts.collection })); onChange(mongoAggregateQuery(aggregateParts.collection || parts.collection)); }
-    else { setParts((current) => ({ ...current, collection: current.collection || aggregateParts.collection })); onChange(mongoQuery(parts.collection || aggregateParts.collection)); }
+    if (next) { setAggregateParts((current) => ({ ...current, collection: current.collection || parts.collection })); write(mongoAggregateQuery(aggregateParts.collection || parts.collection)); }
+    else { setParts((current) => ({ ...current, collection: current.collection || aggregateParts.collection })); write(mongoQuery(parts.collection || aggregateParts.collection)); }
   };
 
   const hasOptions = parts.project.trim() !== "{}" || parts.skip.trim() !== "0" || parts.maxTimeMs.trim() !== "0";

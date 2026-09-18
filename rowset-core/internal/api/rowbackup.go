@@ -408,7 +408,10 @@ func nameSet(names []string) map[string]bool {
 // restorePlan returns the statements that put the backed-up rows back: the
 // old values for an UPDATE, the deleted rows for a DELETE. identityInsert
 // means SQL Server must allow explicit identity values while they run.
-func restorePlan(engineName string, item store.RowBackup, payload rowBackupPayload) (statements []string, identityInsert bool) {
+// For an UPDATE backup, probes[i] selects the row statements[i] restores, so
+// a restore that matches no row can tell a row whose values are already
+// restored from one that no longer exists under its backed-up key.
+func restorePlan(engineName string, item store.RowBackup, payload rowBackupPayload) (statements, probes []string, identityInsert bool) {
 	table := qualifiedTable(engineName, item.Schema, item.Table)
 	generated, identity, key := nameSet(payload.Generated), nameSet(payload.Identity), nameSet(payload.Key)
 	var writable []int
@@ -458,7 +461,7 @@ func restorePlan(engineName string, item store.RowBackup, payload rowBackupPaylo
 			}
 			statements = append(statements, statement.String())
 		}
-		return statements, identityInsert
+		return statements, nil, identityInsert
 	}
 	for _, row := range payload.Rows {
 		var assignments, conditions []string
@@ -476,16 +479,18 @@ func restorePlan(engineName string, item store.RowBackup, payload rowBackupPaylo
 			}
 		}
 		if len(assignments) > 0 && len(conditions) > 0 {
-			statements = append(statements, "UPDATE "+table+" SET "+strings.Join(assignments, ", ")+" WHERE "+strings.Join(conditions, " AND "))
+			where := " WHERE " + strings.Join(conditions, " AND ")
+			statements = append(statements, "UPDATE "+table+" SET "+strings.Join(assignments, ", ")+where)
+			probes = append(probes, "SELECT 1 FROM "+table+where)
 		}
 	}
-	return statements, false
+	return statements, probes, false
 }
 
 // restoreSQL is the restore as a script to review in the editor.
 func restoreSQL(engineName string, item store.RowBackup, payload rowBackupPayload) string {
 	table := qualifiedTable(engineName, item.Schema, item.Table)
-	statements, identityInsert := restorePlan(engineName, item, payload)
+	statements, _, identityInsert := restorePlan(engineName, item, payload)
 	var out strings.Builder
 	fmt.Fprintf(&out, "-- Restores %d row(s) of %s backed up before this %s:\n", item.Rows, table, strings.ToUpper(item.Kind))
 	for _, line := range strings.Split(strings.TrimSpace(payload.Statement), "\n") {
@@ -549,7 +554,7 @@ func (s *Server) applyRowBackup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "INTERNAL", "the backup could not be read")
 		return
 	}
-	statements, identityInsert := restorePlan(connection.Engine, item, payload)
+	statements, probes, identityInsert := restorePlan(connection.Engine, item, payload)
 	if len(statements) == 0 {
 		writeJSON(w, http.StatusOK, map[string]any{"rows": 0})
 		return
@@ -607,10 +612,24 @@ func (s *Server) applyRowBackup(w http.ResponseWriter, r *http.Request) {
 	if identityInsert {
 		statements = append(append([]string{"SET IDENTITY_INSERT " + table + " ON"}, statements...), "SET IDENTITY_INSERT "+table+" OFF")
 	}
-	for _, statement := range statements {
-		if _, err := transaction.Execute(ctx, statement, 0); err != nil {
+	for index, statement := range statements {
+		result, err := transaction.Execute(ctx, statement, 0)
+		if err != nil {
 			writeStatementError(w, err, statement, nil)
 			return
+		}
+		// MySQL counts only changed rows, so a zero count is checked against
+		// the row itself before the restore is refused.
+		if index < len(probes) && result.RowsAffected == 0 {
+			found, err := transaction.Execute(ctx, probes[index], 1)
+			if err != nil {
+				writeStatementError(w, err, probes[index], nil)
+				return
+			}
+			if len(found.Rows) == 0 {
+				writeError(w, http.StatusConflict, "RESTORE_ROW_MISSING", "a backed-up row no longer exists under its original key (it was deleted, or the update changed its key); nothing was restored. Open the Script to restore it by hand.")
+				return
+			}
 		}
 	}
 	if err := transaction.Commit(); err != nil {
