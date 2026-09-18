@@ -1,5 +1,7 @@
 # Rowset Studio
 
+[Website](https://rowset.dev) · [Download](https://github.com/rowsetdev/rowset-studio/releases) · [Blog](https://rowset.dev/blog)
+
 <table align="center"><tr>
   <td align="center" width="72"><img src="rowset-studio/src/assets/engines/postgres.png" height="36" alt="PostgreSQL" /></td>
   <td align="center" width="72"><img src="rowset-studio/src/assets/engines/mysql.png" height="36" alt="MySQL" /></td>
