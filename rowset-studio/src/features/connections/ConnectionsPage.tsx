@@ -131,7 +131,6 @@ function ConnectionRow({
   useEffect(() => {
     if (testAllToken > 0) test.mutate(conn.id);
     // Runs once per bump of the shared token; test.mutate is stable across renders.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [testAllToken]);
 
   return (
