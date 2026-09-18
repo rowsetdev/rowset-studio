@@ -20,7 +20,10 @@ func (s *Server) cassandraQuery(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "BAD_REQUEST", "connection is not Cassandra")
 		return
 	}
-	var input engine.CassandraQueryInput
+	var input struct {
+		engine.CassandraQueryInput
+		Backup bool `json:"backup"`
+	}
 	if !decodeJSON(w, r, &input) {
 		return
 	}
@@ -81,10 +84,19 @@ func (s *Server) cassandraQuery(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := withConnectionTimeout(r, connection, timeout, 10*time.Minute)
 	defer cancel()
+	var backupAnnotations Annotations
+	if input.Backup {
+		backupAnnotations = s.cassandraCaptureBackup(ctx, identity, connection, info, target, database, input.Query)
+		if reason, ok := backupAnnotations["backupBlocked"].(string); ok {
+			writeError(w, http.StatusConflict, "BACKUP_UNAVAILABLE", reason)
+			return
+		}
+	}
 	started := time.Now()
-	result, err := s.engines.CassandraQuery(ctx, target, input)
+	result, err := s.engines.CassandraQuery(ctx, target, input.CassandraQueryInput)
 	duration := time.Since(started).Milliseconds()
 	if err != nil {
+		s.discardRowBackup(identity, backupAnnotations)
 		s.recordActivity(r, connection.ID, input.Query, "error", 0, duration, "", sqlguard.ExactHash(input.Query), auditMeta{decision: "allow", errorMessage: err.Error()})
 		writeError(w, 502, "EXEC_ERROR", err.Error())
 		return
@@ -97,5 +109,6 @@ func (s *Server) cassandraQuery(w http.ResponseWriter, r *http.Request) {
 		s.engines.InvalidateSchema(connection.ID)
 	}
 	s.recordActivity(r, connection.ID, input.Query, "success", rowCount, duration, "", sqlguard.ExactHash(input.Query), auditMeta{decision: "allow"})
-	writeJSON(w, 200, result)
+	response := map[string]any{"columns": result.Columns, "rows": result.Rows, "rowsAffected": result.RowsAffected, "durationMs": result.DurationMS, "truncated": result.Truncated}
+	writeJSON(w, 200, backupAnnotations.addTo(response))
 }

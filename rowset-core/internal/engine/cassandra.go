@@ -2,9 +2,11 @@ package engine
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"net"
 	"strconv"
 	"strings"
@@ -13,6 +15,7 @@ import (
 	sqlguard "github.com/dbaopsio/rowset-studio/rowset-parser"
 	"github.com/gocql/gocql"
 	"golang.org/x/crypto/ssh"
+	"gopkg.in/inf.v0"
 )
 
 type cassandraSSHDialer struct{ client *ssh.Client }
@@ -226,6 +229,163 @@ func jsonSafe(v any) any {
 	default:
 		return v
 	}
+}
+
+// CassandraValue is one captured cell for row-backup storage: Kind picks
+// the literal syntax a restore writes it back with (see cassandra_rowbackup.go
+// in package api), Value is always text so the payload is plain JSON.
+type CassandraValue struct {
+	Kind  string
+	Value string
+}
+
+// encodeCassandraValue captures a MapScan'd value in a form a row backup can
+// store as JSON and later turn back into a CQL literal. It only needs to
+// round-trip the types cassandraColumnRoundTrippable allows.
+func encodeCassandraValue(raw any) CassandraValue {
+	if raw == nil {
+		return CassandraValue{Kind: "null"}
+	}
+	switch v := raw.(type) {
+	case gocql.UUID:
+		return CassandraValue{Kind: "uuid", Value: v.String()}
+	case []byte:
+		return CassandraValue{Kind: "bytes", Value: base64.StdEncoding.EncodeToString(v)}
+	case bool:
+		return CassandraValue{Kind: "bool", Value: strconv.FormatBool(v)}
+	case time.Time:
+		return CassandraValue{Kind: "time", Value: v.UTC().Format(time.RFC3339Nano)}
+	case net.IP:
+		return CassandraValue{Kind: "text", Value: v.String()}
+	case *inf.Dec:
+		if v == nil {
+			return CassandraValue{Kind: "null"}
+		}
+		return CassandraValue{Kind: "num", Value: v.String()}
+	case *big.Int:
+		if v == nil {
+			return CassandraValue{Kind: "null"}
+		}
+		return CassandraValue{Kind: "num", Value: v.String()}
+	case string:
+		return CassandraValue{Kind: "text", Value: v}
+	default:
+		// int/int8/int16/int32/int64/float32/float64: gocql's own default
+		// Go mapping for the remaining round-trippable numeric types.
+		return CassandraValue{Kind: "num", Value: fmt.Sprint(v)}
+	}
+}
+
+// CassandraSelectRaw runs a read-only SELECT for row-backup capture: unlike
+// CassandraQuery, values keep their driver type (via encodeCassandraValue)
+// instead of being flattened for JSON display.
+func (m *Manager) CassandraSelectRaw(ctx context.Context, connection Connection, keyspace, query string, limit int) (columns []string, rows [][]CassandraValue, truncated bool, err error) {
+	session, cleanup, err := cassandraSession(ctx, connection, keyspace)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	defer cleanup()
+	iter := session.Query(query).WithContext(ctx).Iter()
+	cols := iter.Columns()
+	columns = make([]string, len(cols))
+	for i, c := range cols {
+		columns[i] = c.Name
+	}
+	row := make(map[string]any)
+	for iter.MapScan(row) {
+		values := make([]CassandraValue, len(columns))
+		for i, name := range columns {
+			values[i] = encodeCassandraValue(row[name])
+		}
+		rows = append(rows, values)
+		row = make(map[string]any)
+		if len(rows) >= limit {
+			truncated = true
+			break
+		}
+	}
+	if closeErr := iter.Close(); closeErr != nil && !truncated {
+		err = closeErr
+	}
+	return columns, rows, truncated, err
+}
+
+// cassandraColumnRoundTrippable is the set of CQL types row backups know how
+// to capture and restore as a literal (see cassandraLiteral in package api).
+// Collections, tuples, UDTs, counters, duration, date and time-of-day are
+// deliberately left out rather than guessed at: a wrong literal would
+// silently corrupt the restored row.
+func cassandraColumnRoundTrippable(t gocql.Type) bool {
+	switch t {
+	case gocql.TypeAscii, gocql.TypeText, gocql.TypeVarchar,
+		gocql.TypeInt, gocql.TypeBigInt, gocql.TypeSmallInt, gocql.TypeTinyInt,
+		gocql.TypeBoolean, gocql.TypeUUID, gocql.TypeTimeUUID, gocql.TypeTimestamp,
+		gocql.TypeBlob, gocql.TypeFloat, gocql.TypeDouble, gocql.TypeDecimal,
+		gocql.TypeVarint, gocql.TypeInet:
+		return true
+	default:
+		return false
+	}
+}
+
+// CassandraColumnInfo is one column's shape, as row-backup capture needs it.
+type CassandraColumnInfo struct {
+	Name string
+	// "partition_key", "clustering", "regular" or "static".
+	Kind string
+	// The CQL type name (gocql's own name for it, e.g. "text", "int", "blob").
+	Type      string
+	Supported bool
+}
+
+// CassandraTableInfo is a table's row-backup-relevant metadata: its primary
+// key in column order (partition key components, then clustering columns),
+// and every column's type and whether row backups can round-trip it.
+type CassandraTableInfo struct {
+	PrimaryKey []string
+	Columns    []CassandraColumnInfo
+	IsCounter  bool
+}
+
+func (m *Manager) CassandraTableInfo(ctx context.Context, connection Connection, keyspace, table string) (CassandraTableInfo, error) {
+	var info CassandraTableInfo
+	session, cleanup, err := cassandraSession(ctx, connection, keyspace)
+	if err != nil {
+		return info, err
+	}
+	defer cleanup()
+	metadata, err := session.KeyspaceMetadata(keyspace)
+	if err != nil {
+		return info, err
+	}
+	tableMetadata := metadata.Tables[table]
+	if tableMetadata == nil {
+		return info, fmt.Errorf("table %q not found in keyspace %q", table, keyspace)
+	}
+	for _, col := range tableMetadata.PartitionKey {
+		info.PrimaryKey = append(info.PrimaryKey, col.Name)
+	}
+	for _, col := range tableMetadata.ClusteringColumns {
+		info.PrimaryKey = append(info.PrimaryKey, col.Name)
+	}
+	for _, name := range tableMetadata.OrderedColumns {
+		col := tableMetadata.Columns[name]
+		kind := "regular"
+		switch col.Kind {
+		case gocql.ColumnPartitionKey:
+			kind = "partition_key"
+		case gocql.ColumnClusteringKey:
+			kind = "clustering"
+		case gocql.ColumnStatic:
+			kind = "static"
+		}
+		typ := col.Type.Type()
+		if typ == gocql.TypeCounter {
+			info.IsCounter = true
+		}
+		info.Columns = append(info.Columns, CassandraColumnInfo{Name: name, Kind: kind, Type: typ.String(), Supported: cassandraColumnRoundTrippable(typ)})
+	}
+	return info, nil
 }
 
 // ErrCQLExportUnsupported identifies tables that cannot be restored with

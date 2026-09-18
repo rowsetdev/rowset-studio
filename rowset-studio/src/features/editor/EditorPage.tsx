@@ -520,7 +520,7 @@ function EditorWorkspace({ snapshot, initial }: { snapshot: WorkspaceSnapshot; i
     };
     // A restore script puts rows back; backing it up again would only add noise.
     const backup = !skipBackup && !shared && !activeTab?.restoreOf && rowBackupEnabled();
-    const mongoBackupNotice = (result: { backup?: { id: string; rows: number }; backupSkipped?: string }): string | undefined => {
+    const backupNotice = (result: { backup?: { id: string; rows: number }; backupSkipped?: string }): string | undefined => {
       if (result.backup) return `Backed up ${result.backup.rows} document(s); restore from Activity → Row backups.`;
       if (result.backupSkipped) return `No backup was taken: ${result.backupSkipped}.`;
       return undefined;
@@ -533,7 +533,7 @@ function EditorWorkspace({ snapshot, initial }: { snapshot: WorkspaceSnapshot; i
         const response = txnId
           ? await mongoTxnUpdate(connectionId, txnId, { collection: request.collection, filter: request.filter, update: request.update, backup: request.backup })
           : await mongoUpdate(connectionId, request);
-        return { columns: ["matchedCount", "modifiedCount"], rows: [[response.matchedCount, response.modifiedCount]], rowCount: 1, durationMs: response.durationMs, policyNotice: mongoBackupNotice(response) };
+        return { columns: ["matchedCount", "modifiedCount"], rows: [[response.matchedCount, response.modifiedCount]], rowCount: 1, durationMs: response.durationMs, policyNotice: backupNotice(response) };
       }
       if (!aggregate && isMongoDeleteQuery(sql)) {
         const request = JSON.parse(mongoDeleteRequest(sql, selectedDb, backup)) as { collection: string; filter: unknown; backup: boolean; database: string };
@@ -541,7 +541,7 @@ function EditorWorkspace({ snapshot, initial }: { snapshot: WorkspaceSnapshot; i
         const response = txnId
           ? await mongoTxnDelete(connectionId, txnId, { collection: request.collection, filter: request.filter, backup: request.backup })
           : await mongoDelete(connectionId, request);
-        return { columns: ["deletedCount"], rows: [[response.deletedCount]], rowCount: 1, durationMs: response.durationMs, policyNotice: mongoBackupNotice(response) };
+        return { columns: ["deletedCount"], rows: [[response.deletedCount]], rowCount: 1, durationMs: response.durationMs, policyNotice: backupNotice(response) };
       }
       const path = aggregate ? "aggregate" : "find";
       const body = aggregate ? mongoAggregateRequest(sql, selectedDb) : mongoRequest(sql, selectedDb);
@@ -565,8 +565,8 @@ function EditorWorkspace({ snapshot, initial }: { snapshot: WorkspaceSnapshot; i
       return { columns: ["key", "type", "ttl", "value"], rows: response.entries.map(e => [e.key, e.type, e.ttl, e.value]), rowCount: response.entries.length, durationMs: response.durationMs, truncated: response.cursor !== 0, policyNotice: response.cursor !== 0 ? `Scan limit: ${response.limit}; more keys remain (cursor ${response.cursor})` : undefined };
     };
     const runCassandra = async (): Promise<QueryResult> => {
-      const response = await api<{ columns: string[]; rows: unknown[][]; durationMs: number; truncated: boolean }>(`/connections/${connectionId}/cassandra/query`, { method: "POST", signal: controller.signal, body: JSON.stringify({ keyspace: selectedDb, query: sql, limit: 1000 }) });
-      return { columns: response.columns ?? [], rows: response.rows ?? [], rowCount: (response.rows ?? []).length, durationMs: response.durationMs, truncated: response.truncated };
+      const response = await api<{ columns: string[]; rows: unknown[][]; durationMs: number; truncated: boolean; backup?: { id: string; rows: number }; backupSkipped?: string }>(`/connections/${connectionId}/cassandra/query`, { method: "POST", signal: controller.signal, body: JSON.stringify({ keyspace: selectedDb, query: sql, limit: 1000, backup }) });
+      return { columns: response.columns ?? [], rows: response.rows ?? [], rowCount: (response.rows ?? []).length, durationMs: response.durationMs, truncated: response.truncated, policyNotice: backupNotice(response) };
     };
     return (isMongo ? runMongo() : isElasticsearch ? runElasticsearch() : isRedis ? runRedis() : isCassandra ? runCassandra() : tx ? txnQuery(tx.connectionId, tx.id, sql, tx.database, controller.signal, progress, backup) : runQuery(connectionId, sql, database, nodeRole, controller.signal, progress, backup))
       .then((res) => {

@@ -82,7 +82,7 @@ export default function RowBackups({ connections, search }: { connections: Conne
       ) : rows.length === 0 ? (
         <div className="p-6 text-sm text-slate-500">
           <p className="font-medium text-slate-700 dark:text-slate-200">{backups.data?.length ? "No backups match this search." : "No row backups yet"}</p>
-          {!backups.data?.length && <p className="mt-1 max-w-xl">Before an UPDATE or DELETE on one table with a WHERE clause, or a MongoDB document update/delete, Rowset saves what it is about to change (up to 10,000 rows or documents). Open a backup's restore script here to put them back.</p>}
+          {!backups.data?.length && <p className="mt-1 max-w-xl">Before an UPDATE or DELETE on one table with a WHERE clause (SQL or CQL), or a MongoDB document update/delete, Rowset saves what it is about to change (up to 10,000 rows or documents). Open a backup's restore script here to put them back.</p>}
         </div>
       ) : (
         <div className="overflow-x-auto">
@@ -144,7 +144,9 @@ export default function RowBackups({ connections, search }: { connections: Conne
         <p className="mt-2 text-[13px] text-slate-600 dark:text-slate-300">
           {byId.get(restoring.connectionId)?.engine === "mongodb"
             ? "Documents are restored one at a time, not in a single transaction (MongoDB transactions need a replica set). A failure partway through leaves the ones already restored in place. Policies apply as in the editor."
-            : "It runs in one transaction: if any statement fails, nothing changes. Policies apply as in the editor."}
+            : byId.get(restoring.connectionId)?.engine === "cassandra"
+              ? "Rows are restored in CQL batches of up to 50 (each batch atomic; a failure partway through leaves earlier batches applied). Policies apply as in the editor."
+              : "It runs in one transaction: if any statement fails, nothing changes. Policies apply as in the editor."}
         </p>
         <div className="mt-4 flex justify-end gap-2">
           <button type="button" onClick={() => setRestoring(null)} className="h-8 rounded-md px-3 text-[13px] text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800">Cancel</button>

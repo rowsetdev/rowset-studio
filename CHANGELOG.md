@@ -5,6 +5,23 @@ and `scripts/package-macos.sh` stamp it into Studio (sidebar), the `rowset`
 executable and the macOS app. Every change set bumps the patch version and adds
 an entry here.
 
+## 0.0.95 — 2026-09-18
+
+- Added: row backups for Cassandra. A governed UPDATE/DELETE with a WHERE
+  clause (USING TTL/TIMESTAMP and IF are tolerated) saves the matched rows
+  first; Activity → Row backups restores them in one click, in CQL batches
+  of up to 50, or opens a real, runnable BEGIN BATCH/APPLY BATCH script to
+  review first. Supports the common scalar CQL types (text, int family,
+  boolean, uuid/timeuuid, timestamp, blob, float/double, decimal, varint,
+  inet); collections, tuples, UDTs, counters, duration, date and
+  time-of-day columns are deliberately skipped rather than guessed at, with
+  a reason shown in the run result, and counter tables are skipped
+  entirely. Verified live: UPDATE and DELETE capture, both restore paths,
+  and both skip cases (unsupported column type, counter table), round-trip
+  a uuid/text/boolean/decimal/blob/timestamp row exactly.
+- Docs: repo hygiene files added — CODE_OF_CONDUCT.md, CONTRIBUTING.md,
+  issue templates and a pull request template.
+
 ## 0.0.94 — 2026-09-17
 
 - Added: the MongoDB editor's Run button now executes `updateOne()`/

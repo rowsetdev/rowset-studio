@@ -16,6 +16,7 @@ require (
 	go.mongodb.org/mongo-driver/v2 v2.9.1
 	golang.org/x/crypto v0.54.0
 	golang.org/x/sys v0.47.0
+	gopkg.in/inf.v0 v0.9.1
 	modernc.org/sqlite v1.56.0
 )
 
@@ -82,7 +83,6 @@ require (
 	golang.org/x/text v0.40.0 // indirect
 	golang.org/x/tools v0.47.0 // indirect
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da // indirect
-	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	modernc.org/libc v1.74.4 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
