@@ -93,10 +93,22 @@ jobs:
           esac
       - name: Wait for database native port
         env:
+          DB_ENGINE: ${{ matrix.engine }}
           DB_PORT: ${{ matrix.port }}
         run: |
+          # A published port accepting TCP connections isn't the same as the
+          # server being ready to speak its real protocol: Cassandra's native
+          # port opens well before it can negotiate a CQL protocol version,
+          # and Elasticsearch/ClickHouse need an actual query to succeed.
+          # Engines below without their own case still just wait for the
+          # port (already reliable for them).
           for _ in $(seq 1 120); do
-            if timeout 1 bash -c "echo > /dev/tcp/127.0.0.1/$DB_PORT" 2>/dev/null; then exit 0; fi
+            case "$DB_ENGINE" in
+              cassandra) docker exec rowset-live cqlsh -e 'describe cluster' >/dev/null 2>&1 && exit 0 ;;
+              elasticsearch) curl -sf "http://127.0.0.1:$DB_PORT" >/dev/null 2>&1 && exit 0 ;;
+              clickhouse) docker exec rowset-live clickhouse-client --password RowsetCI2026Pass --query 'SELECT 1' >/dev/null 2>&1 && exit 0 ;;
+              *) timeout 1 bash -c "echo > /dev/tcp/127.0.0.1/$DB_PORT" 2>/dev/null && exit 0 ;;
+            esac
             sleep 2
           done
           docker logs rowset-live || true
