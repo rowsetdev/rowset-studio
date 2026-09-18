@@ -142,11 +142,14 @@ export default function RowBackups({ connections, search }: { connections: Conne
             : `The ${restoring.rows} row(s) of ${restoring.table} get the values they had before the UPDATE; changes made to them since then are overwritten.`}
         </p>
         <p className="mt-2 text-[13px] text-slate-600 dark:text-slate-300">
-          {byId.get(restoring.connectionId)?.engine === "mongodb"
-            ? "Documents are restored one at a time, not in a single transaction (MongoDB transactions need a replica set). A failure partway through leaves the ones already restored in place. Policies apply as in the editor."
-            : byId.get(restoring.connectionId)?.engine === "cassandra"
-              ? "Rows are restored in CQL batches of up to 50 (each batch atomic; a failure partway through leaves earlier batches applied). Policies apply as in the editor."
-              : "It runs in one transaction: if any statement fails, nothing changes. Policies apply as in the editor."}
+          {(() => {
+            const engine = byId.get(restoring.connectionId)?.engine;
+            if (engine === "mongodb") return "Documents are restored one at a time, not in a single transaction (MongoDB transactions need a replica set). A failure partway through leaves the ones already restored in place. Policies apply as in the editor.";
+            if (engine === "cassandra") return "Rows are restored in CQL batches of up to 50 (each batch atomic; a failure partway through leaves earlier batches applied). Policies apply as in the editor.";
+            if (engine === "redis" || engine === "valkey") return "The key is put back exactly as it was (or removed, if it did not exist before) in one operation. Policies apply as in the editor.";
+            if (engine === "elasticsearch") return "The document is re-indexed exactly as it was, in one operation. Policies apply as in the editor.";
+            return "It runs in one transaction: if any statement fails, nothing changes. Policies apply as in the editor.";
+          })()}
         </p>
         <div className="mt-4 flex justify-end gap-2">
           <button type="button" onClick={() => setRestoring(null)} className="h-8 rounded-md px-3 text-[13px] text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800">Cancel</button>

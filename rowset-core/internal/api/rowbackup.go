@@ -536,6 +536,14 @@ func (s *Server) applyRowBackup(w http.ResponseWriter, r *http.Request) {
 		s.applyCassandraRowBackup(w, r, identity, connection, item)
 		return
 	}
+	if connection.Engine == "redis" || connection.Engine == "valkey" {
+		s.applyRedisRowBackup(w, r, identity, connection, item)
+		return
+	}
+	if connection.Engine == "elasticsearch" {
+		s.applyElasticsearchRowBackup(w, r, identity, connection, item)
+		return
+	}
 	payload, err := s.openRowBackup(item)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "INTERNAL", "the backup could not be read")
@@ -659,6 +667,24 @@ func (s *Server) rowBackupRestore(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"sql": cassandraRestoreScript(item, payload), "connectionId": item.ConnectionID, "database": item.Database, "table": item.Table})
+		return
+	}
+	if connection.Engine == "redis" || connection.Engine == "valkey" {
+		payload, err := s.openRedisRowBackup(item)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "INTERNAL", "the backup could not be read")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"sql": redisRestoreScript(item, payload), "connectionId": item.ConnectionID, "database": item.Database, "table": item.Table})
+		return
+	}
+	if connection.Engine == "elasticsearch" {
+		payload, err := s.openElasticsearchRowBackup(item)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "INTERNAL", "the backup could not be read")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"sql": elasticsearchRestoreScript(item, payload), "connectionId": item.ConnectionID, "database": item.Database, "table": item.Table})
 		return
 	}
 	payload, err := s.openRowBackup(item)

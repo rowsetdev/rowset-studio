@@ -209,6 +209,38 @@ func (m *Manager) ElasticsearchDelete(ctx context.Context, connection Connection
 	return err
 }
 
+// ElasticsearchGet fetches one document's current _source, for row-backup
+// capture before an update or delete. exists is false on a 404, which is
+// not an error: the document simply isn't there to back up.
+func (m *Manager) ElasticsearchGet(ctx context.Context, connection Connection, index, id string) (source json.RawMessage, exists bool, err error) {
+	client, err := elasticsearchClient(connection)
+	if err != nil {
+		return nil, false, err
+	}
+	res, err := client.Get(index, id, client.Get.WithContext(ctx))
+	if err != nil {
+		return nil, false, err
+	}
+	defer res.Body.Close()
+	if res.StatusCode == http.StatusNotFound {
+		return nil, false, nil
+	}
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		return nil, false, err
+	}
+	if res.IsError() {
+		return nil, false, fmt.Errorf("elasticsearch: %s", strings.TrimSpace(string(body)))
+	}
+	var decoded struct {
+		Source json.RawMessage `json:"_source"`
+	}
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		return nil, false, err
+	}
+	return decoded.Source, true, nil
+}
+
 type ElasticsearchSearchInput struct {
 	Index string          `json:"index"`
 	Query json.RawMessage `json:"query"`

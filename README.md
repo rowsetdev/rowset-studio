@@ -43,10 +43,10 @@ encrypted in a local SQLite database.
 | DuckDB | Absolute path to an existing file; CGO build | SQL, transactions, tables/views, DDL, CSV import/export, JSON export |
 | <img src="rowset-studio/src/assets/engines/clickhouse.svg" height="18" valign="middle"> ClickHouse | Native TCP: 9440 with TLS, 9000 without | SQL, databases, tables/views, DDL, CSV/JSON export, estimated plans |
 | <img src="rowset-studio/src/assets/engines/mongodb.svg" height="18" valign="middle"> MongoDB | Host/port; `authSource=admin` | Compass-style filter/project/sort/skip/limit query bar synced with `db.collection.find()`, `db.collection.aggregate([...])` read-only pipelines, document insert/update/delete with row backups, manual-commit transactions (replica set or mongos required) |
-| <img src="rowset-studio/src/assets/engines/redis.svg" height="18" valign="middle"> Redis | Host/port | Pattern/type scan bar, keys grouped by type as pseudo-tables, string/hash key writes and delete |
-| Valkey | Host/port | Redis-compatible pattern/type scan bar, key previews, string/hash key writes and delete |
+| <img src="rowset-studio/src/assets/engines/redis.svg" height="18" valign="middle"> Redis | Host/port | Pattern/type scan bar, keys grouped by type as pseudo-tables, string/hash key writes and delete with row backups |
+| Valkey | Host/port | Redis-compatible pattern/type scan bar, key previews, string/hash key writes and delete with row backups |
 | <img src="rowset-studio/src/assets/engines/cassandra.svg" height="18" valign="middle"> Cassandra | Contact points, keyspace, TLS/SSH, consistency/paging | Governed CQL reads/writes/DDL/batches with row backups, schema/DDL, CSV import, CSV/JSON export, CQL `INSERT JSON` export for base tables without counters |
-| <img src="rowset-studio/src/assets/engines/elasticsearch.svg" height="18" valign="middle"> Elasticsearch | HTTP API host/port | Index/query/size search bar with `sort`/`search_after` pagination and `aggs`, index mapping browsing, document index/update/delete |
+| <img src="rowset-studio/src/assets/engines/elasticsearch.svg" height="18" valign="middle"> Elasticsearch | HTTP API host/port | Index/query/size search bar with `sort`/`search_after` pagination and `aggs`, index mapping browsing, document index/update/delete with row backups |
 
 MongoDB, Redis, Valkey and Elasticsearch writes are limited to single-document/key
 operations (no bulk APIs yet); MongoDB additionally has read-only
@@ -87,10 +87,12 @@ below for exact limits.
   automatically. Export as Markdown or as a SQL script. **Save** in the
   editor adds the current query to a notebook; a cell opens in a new editor
   tab.
-- **Row backups** — optionally save the rows/documents an UPDATE or DELETE
-  changes, for SQL engines, MongoDB and Cassandra (up to 10,000 per
-  statement); Activity → Row backups restores them in one click or opens
-  the restore statements/script in a new tab to review or edit first.
+- **Row backups** — optionally save the rows/documents/keys an UPDATE,
+  DELETE or write changes, for every supported engine (up to 10,000 per
+  SQL/Cassandra statement; MongoDB/Redis/Elasticsearch back up one
+  document or key at a time); Activity → Row backups restores them in one
+  click or opens the restore statements/script in a new tab to review or
+  edit first.
 - **Schedules** — run a SELECT at set times in your time zone and save each
   result as a CSV or JSON file, while Rowset Studio is running.
 - **Activity** — your statements across every connection, plus
@@ -122,14 +124,19 @@ MongoDB, Redis, Valkey and Elasticsearch support single-document/key
 insert, update and delete from the query toolbar's **Write** action, behind
 the same policy, read-only and audit rules as SQL writes. MongoDB also runs
 read-only `aggregate()` pipelines, with `$out`, `$merge`, `$lookup` and
-other writing/cross-collection/JavaScript stages rejected, manual-commit
-transactions (see above; MongoDB-only, requires a replica set or mongos),
-and row backups before update/delete (see Row backups above; Redis and
-Elasticsearch don't have this yet). Bulk APIs and SSH tunnels are not yet
-supported for any of the four, and index/primary-key/foreign-key metadata
-is not loaded for any non-`database/sql` engine (SQLite, DuckDB,
-ClickHouse and these four). Inline grid editing remains available only for
-the SQL engines, since it's built on generated UPDATE/DELETE statements.
+other writing/cross-collection/JavaScript stages rejected, and manual-commit
+transactions (see above; MongoDB-only, requires a replica set or mongos).
+All four also take a row backup before an update/delete/overwrite (see Row
+backups above): MongoDB backs up the document, Elasticsearch re-indexes it
+on restore; Redis/Valkey capture the key with `DUMP`/`PTTL` and restore it
+with `RESTORE`, byte-for-byte with its original TTL, or remove it if it
+didn't exist before the write (Redis has no distinct update mode, so a
+`Write` "Set" is backed up the same as a delete). Bulk APIs and SSH
+tunnels are not yet supported for any of the four, and
+index/primary-key/foreign-key metadata is not loaded for any
+non-`database/sql` engine (SQLite, DuckDB, ClickHouse and these four).
+Inline grid editing remains available only for the SQL engines, since it's
+built on generated UPDATE/DELETE statements.
 Cassandra supports CSV import in logged batches, CSV/JSON export, and row
 backups on a governed UPDATE/DELETE with a WHERE clause — restricted to
 tables using only scalar column types it can round-trip as a CQL literal

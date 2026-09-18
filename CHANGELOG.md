@@ -5,6 +5,21 @@ and `scripts/package-macos.sh` stamp it into Studio (sidebar), the `rowset`
 executable and the macOS app. Every change set bumps the patch version and adds
 an entry here.
 
+## 0.0.96 — 2026-09-18
+
+- Added: row backups for Redis/Valkey and Elasticsearch, completing row
+  backups across every supported engine. Redis/Valkey capture a key's
+  exact state with `DUMP`/`PTTL` before a write or delete and restore it
+  byte-for-byte (with its original TTL) via `RESTORE`, or remove it if it
+  didn't exist before — Redis has no distinct update mode, so a `Write`
+  "Set" is backed up the same as a delete, unlike Mongo/Elasticsearch
+  insert. Elasticsearch fetches the document's `_source` before an update
+  or delete and restores it with a full re-index. Verified live: Redis Set
+  on a new key, Set overwriting an existing key (with TTL), and Delete,
+  each captured and restored correctly; Elasticsearch Insert (not backed
+  up, matching Mongo), Update and Delete, each captured and restored
+  correctly.
+
 ## 0.0.95 — 2026-09-18
 
 - Added: row backups for Cassandra. A governed UPDATE/DELETE with a WHERE

@@ -90,7 +90,10 @@ func (s *Server) redisWrite(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 403, "UNSUPPORTED", "key writes are available to personal workspace administrators only")
 		return
 	}
-	var input engine.RedisWriteInput
+	var input struct {
+		engine.RedisWriteInput
+		Backup bool `json:"backup"`
+	}
 	if !decodeJSON(w, r, &input) {
 		return
 	}
@@ -112,16 +115,21 @@ func (s *Server) redisWrite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer cancel()
+	var backupAnnotations Annotations
+	if input.Backup {
+		backupAnnotations = s.redisCaptureBackup(ctx, identity, connection, target, database, input.Key, "update", string(raw))
+	}
 	started := time.Now()
-	err := s.engines.RedisWrite(ctx, target, input)
+	err := s.engines.RedisWrite(ctx, target, input.RedisWriteInput)
 	duration := time.Since(started).Milliseconds()
 	if err != nil {
+		s.discardRowBackup(identity, backupAnnotations)
 		s.recordActivity(r, connection.ID, string(raw), "error", 0, duration, "", "", auditMeta{decision: "allow", errorMessage: err.Error()})
 		writeError(w, 502, "EXEC_ERROR", err.Error())
 		return
 	}
 	s.recordActivity(r, connection.ID, string(raw), "success", 1, duration, "", "", auditMeta{decision: "allow"})
-	writeJSON(w, 200, map[string]any{"durationMs": duration})
+	writeJSON(w, 200, backupAnnotations.addTo(map[string]any{"durationMs": duration}))
 }
 
 func (s *Server) redisDelete(w http.ResponseWriter, r *http.Request) {
@@ -134,7 +142,10 @@ func (s *Server) redisDelete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 403, "UNSUPPORTED", "key writes are available to personal workspace administrators only")
 		return
 	}
-	var input engine.RedisDeleteInput
+	var input struct {
+		engine.RedisDeleteInput
+		Backup bool `json:"backup"`
+	}
 	if !decodeJSON(w, r, &input) {
 		return
 	}
@@ -155,14 +166,19 @@ func (s *Server) redisDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer cancel()
+	var backupAnnotations Annotations
+	if input.Backup {
+		backupAnnotations = s.redisCaptureBackup(ctx, identity, connection, target, database, input.Key, "delete", string(raw))
+	}
 	started := time.Now()
-	deleted, err := s.engines.RedisDelete(ctx, target, input)
+	deleted, err := s.engines.RedisDelete(ctx, target, input.RedisDeleteInput)
 	duration := time.Since(started).Milliseconds()
 	if err != nil {
+		s.discardRowBackup(identity, backupAnnotations)
 		s.recordActivity(r, connection.ID, string(raw), "error", 0, duration, "", "", auditMeta{decision: "allow", errorMessage: err.Error()})
 		writeError(w, 502, "EXEC_ERROR", err.Error())
 		return
 	}
 	s.recordActivity(r, connection.ID, string(raw), "success", deleted, duration, "", "", auditMeta{decision: "allow"})
-	writeJSON(w, 200, map[string]any{"deletedCount": deleted, "durationMs": duration})
+	writeJSON(w, 200, backupAnnotations.addTo(map[string]any{"deletedCount": deleted, "durationMs": duration}))
 }

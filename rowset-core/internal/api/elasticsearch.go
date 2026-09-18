@@ -135,7 +135,10 @@ func (s *Server) elasticsearchUpdate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 403, "UNSUPPORTED", "document writes are available to personal workspace administrators only")
 		return
 	}
-	var input engine.ElasticsearchUpdateInput
+	var input struct {
+		engine.ElasticsearchUpdateInput
+		Backup bool `json:"backup"`
+	}
 	if !decodeJSON(w, r, &input) {
 		return
 	}
@@ -156,16 +159,21 @@ func (s *Server) elasticsearchUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer cancel()
+	var backupAnnotations Annotations
+	if input.Backup {
+		backupAnnotations = s.elasticsearchCaptureBackup(ctx, identity, connection, target, database, input.Index, input.ID, "update", string(raw))
+	}
 	started := time.Now()
-	err := s.engines.ElasticsearchUpdate(ctx, target, input)
+	err := s.engines.ElasticsearchUpdate(ctx, target, input.ElasticsearchUpdateInput)
 	duration := time.Since(started).Milliseconds()
 	if err != nil {
+		s.discardRowBackup(identity, backupAnnotations)
 		s.recordActivity(r, connection.ID, string(raw), "error", 0, duration, "", "", auditMeta{decision: "allow", errorMessage: err.Error()})
 		writeError(w, 502, "EXEC_ERROR", err.Error())
 		return
 	}
 	s.recordActivity(r, connection.ID, string(raw), "success", 1, duration, "", "", auditMeta{decision: "allow"})
-	writeJSON(w, 200, map[string]any{"durationMs": duration})
+	writeJSON(w, 200, backupAnnotations.addTo(map[string]any{"durationMs": duration}))
 }
 
 func (s *Server) elasticsearchDelete(w http.ResponseWriter, r *http.Request) {
@@ -178,7 +186,10 @@ func (s *Server) elasticsearchDelete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 403, "UNSUPPORTED", "document writes are available to personal workspace administrators only")
 		return
 	}
-	var input engine.ElasticsearchDeleteInput
+	var input struct {
+		engine.ElasticsearchDeleteInput
+		Backup bool `json:"backup"`
+	}
 	if !decodeJSON(w, r, &input) {
 		return
 	}
@@ -199,14 +210,19 @@ func (s *Server) elasticsearchDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer cancel()
+	var backupAnnotations Annotations
+	if input.Backup {
+		backupAnnotations = s.elasticsearchCaptureBackup(ctx, identity, connection, target, database, input.Index, input.ID, "delete", string(raw))
+	}
 	started := time.Now()
-	err := s.engines.ElasticsearchDelete(ctx, target, input)
+	err := s.engines.ElasticsearchDelete(ctx, target, input.ElasticsearchDeleteInput)
 	duration := time.Since(started).Milliseconds()
 	if err != nil {
+		s.discardRowBackup(identity, backupAnnotations)
 		s.recordActivity(r, connection.ID, string(raw), "error", 0, duration, "", "", auditMeta{decision: "allow", errorMessage: err.Error()})
 		writeError(w, 502, "EXEC_ERROR", err.Error())
 		return
 	}
 	s.recordActivity(r, connection.ID, string(raw), "success", 1, duration, "", "", auditMeta{decision: "allow"})
-	writeJSON(w, 200, map[string]any{"durationMs": duration})
+	writeJSON(w, 200, backupAnnotations.addTo(map[string]any{"durationMs": duration}))
 }

@@ -50,6 +50,10 @@ export default function NoSqlWriteDialog({ connectionId, engine, database, txnId
   const [ttl, setTtl] = useState("");
   const shared = useShared();
   const backup = mode !== "insert" && !shared && rowBackupEnabled();
+  // Redis has no distinct update mode — "Set" (mode "insert") can overwrite
+  // an existing key just as easily as create one — so unlike Mongo/ES it
+  // isn't excluded from backup.
+  const redisBackup = !shared && rowBackupEnabled();
 
   async function run() {
     setBusy(true);
@@ -80,23 +84,23 @@ export default function NoSqlWriteDialog({ connectionId, engine, database, txnId
           const response = await elasticsearchIndex(connectionId, { index, id, document: parseJSON("Document", document) });
           setResult(`Indexed _id: ${response.id}`);
         } else if (mode === "update") {
-          await elasticsearchUpdate(connectionId, { index, id, doc: parseJSON("Doc", update) });
-          setResult("Updated.");
+          const response = await elasticsearchUpdate(connectionId, { index, id, doc: parseJSON("Doc", update), backup });
+          setResult(`Updated.${backupSuffix(response)}`);
         } else {
-          await elasticsearchDelete(connectionId, { index, id });
-          setResult("Deleted.");
+          const response = await elasticsearchDelete(connectionId, { index, id, backup });
+          setResult(`Deleted.${backupSuffix(response)}`);
         }
       } else {
         if (!key.trim()) throw new Error("Key is required");
         if (mode === "delete") {
-          const response = await redisDelete(connectionId, { database, key });
-          setResult(`Deleted ${response.deletedCount}`);
+          const response = await redisDelete(connectionId, { database, key, backup: redisBackup });
+          setResult(`Deleted ${response.deletedCount}.${backupSuffix(response)}`);
         } else {
           if (keyType === "hash" && !field.trim()) throw new Error("Field is required for a hash write");
           const ttlSeconds = ttl.trim() ? Number(ttl) : undefined;
           if (ttlSeconds !== undefined && (!Number.isFinite(ttlSeconds) || ttlSeconds < 0)) throw new Error("TTL must be a positive number of seconds");
-          await redisWrite(connectionId, { database, key, type: keyType, field: keyType === "hash" ? field : undefined, value, ttlSeconds });
-          setResult("Written.");
+          const response = await redisWrite(connectionId, { database, key, type: keyType, field: keyType === "hash" ? field : undefined, value, ttlSeconds, backup: redisBackup });
+          setResult(`Written.${backupSuffix(response)}`);
         }
       }
       onWritten();

@@ -253,24 +253,24 @@ export function mongoRollbackTxn(connectionId: string, txnId: string) {
   return api<void>(`/connections/${connectionId}/documents/txn/${txnId}/rollback`, { method: "POST" });
 }
 
-export function redisWrite(connectionId: string, request: { database?: string; key: string; type: "string" | "hash"; field?: string; value: string; ttlSeconds?: number }) {
-  return api<{ durationMs: number }>(`/connections/${connectionId}/redis/write`, { method: "POST", body: JSON.stringify(request) });
+export function redisWrite(connectionId: string, request: { database?: string; key: string; type: "string" | "hash"; field?: string; value: string; ttlSeconds?: number; backup?: boolean }) {
+  return api<{ durationMs: number } & WithBackup>(`/connections/${connectionId}/redis/write`, { method: "POST", body: JSON.stringify(request) });
 }
 
-export function redisDelete(connectionId: string, request: { database?: string; key: string }) {
-  return api<{ deletedCount: number; durationMs: number }>(`/connections/${connectionId}/redis/delete`, { method: "POST", body: JSON.stringify(request) });
+export function redisDelete(connectionId: string, request: { database?: string; key: string; backup?: boolean }) {
+  return api<{ deletedCount: number; durationMs: number } & WithBackup>(`/connections/${connectionId}/redis/delete`, { method: "POST", body: JSON.stringify(request) });
 }
 
 export function elasticsearchIndex(connectionId: string, request: { index: string; id: string; document: unknown }) {
   return api<{ id: string; durationMs: number }>(`/connections/${connectionId}/elasticsearch/index`, { method: "POST", body: JSON.stringify(request) });
 }
 
-export function elasticsearchUpdate(connectionId: string, request: { index: string; id: string; doc: unknown }) {
-  return api<{ durationMs: number }>(`/connections/${connectionId}/elasticsearch/update`, { method: "POST", body: JSON.stringify(request) });
+export function elasticsearchUpdate(connectionId: string, request: { index: string; id: string; doc: unknown; backup?: boolean }) {
+  return api<{ durationMs: number } & WithBackup>(`/connections/${connectionId}/elasticsearch/update`, { method: "POST", body: JSON.stringify(request) });
 }
 
-export function elasticsearchDelete(connectionId: string, request: { index: string; id: string }) {
-  return api<{ durationMs: number }>(`/connections/${connectionId}/elasticsearch/delete`, { method: "POST", body: JSON.stringify(request) });
+export function elasticsearchDelete(connectionId: string, request: { index: string; id: string; backup?: boolean }) {
+  return api<{ durationMs: number } & WithBackup>(`/connections/${connectionId}/elasticsearch/delete`, { method: "POST", body: JSON.stringify(request) });
 }
 
 // The statement that creates an object, for the schema browser's Show DDL.

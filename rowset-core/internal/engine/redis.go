@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -248,6 +249,62 @@ func (m *Manager) RedisDelete(ctx context.Context, connection Connection, input 
 	}
 	defer client.Close()
 	return client.Del(ctx, input.Key).Result()
+}
+
+// RedisSnapshot is a key's exact state, for row-backup capture/restore. The
+// value is DUMP's own serialization (Redis's internal RDB-like encoding),
+// not a per-type preview: it round-trips any key type byte-for-byte,
+// including its exact encoding, unlike parsing hash/list/set members back
+// into literals would.
+type RedisSnapshot struct {
+	Existed bool
+	Dump    string // base64 of the DUMP payload; empty when Existed is false
+	TTLMs   int64  // 0 means no expiry
+}
+
+// RedisSnapshotKey captures a key's current state before a write or delete
+// changes or removes it.
+func (m *Manager) RedisSnapshotKey(ctx context.Context, connection Connection, key string) (RedisSnapshot, error) {
+	client, err := redisClient(connection)
+	if err != nil {
+		return RedisSnapshot{}, err
+	}
+	defer client.Close()
+	dump, err := client.Dump(ctx, key).Result()
+	if err != nil {
+		if err == goredis.Nil {
+			return RedisSnapshot{Existed: false}, nil
+		}
+		return RedisSnapshot{}, err
+	}
+	ttl, err := client.PTTL(ctx, key).Result()
+	if err != nil {
+		return RedisSnapshot{}, err
+	}
+	var ms int64
+	if ttl > 0 {
+		ms = ttl.Milliseconds()
+	}
+	return RedisSnapshot{Existed: true, Dump: base64.StdEncoding.EncodeToString([]byte(dump)), TTLMs: ms}, nil
+}
+
+// RedisRestoreSnapshot puts a key back exactly as RedisSnapshotKey captured
+// it: deleted if it did not exist yet, or restored with RESTORE (its exact
+// bytes and TTL) otherwise.
+func (m *Manager) RedisRestoreSnapshot(ctx context.Context, connection Connection, key string, snapshot RedisSnapshot) error {
+	client, err := redisClient(connection)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	if !snapshot.Existed {
+		return client.Del(ctx, key).Err()
+	}
+	raw, err := base64.StdEncoding.DecodeString(snapshot.Dump)
+	if err != nil {
+		return err
+	}
+	return client.RestoreReplace(ctx, key, time.Duration(snapshot.TTLMs)*time.Millisecond, string(raw)).Err()
 }
 
 func redisPreview(ctx context.Context, client *goredis.Client, key, kind string) (json.RawMessage, error) {
