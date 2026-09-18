@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { mongoInsert, mongoUpdate, mongoDelete, mongoTxnInsert, mongoTxnUpdate, mongoTxnDelete, redisWrite, redisDelete, elasticsearchIndex, elasticsearchUpdate, elasticsearchDelete, type BackupNote } from "./api";
+import { mongoInsert, mongoInsertMany, mongoUpdate, mongoDelete, mongoTxnInsert, mongoTxnUpdate, mongoTxnDelete, redisWrite, redisBulkWrite, redisDelete, elasticsearchIndex, elasticsearchBulkIndex, elasticsearchUpdate, elasticsearchDelete, type BackupNote } from "./api";
 import { ApiError } from "../../lib/api";
 import { rowBackupEnabled } from "../../lib/preferences";
 import { useShared } from "../../lib/instance";
@@ -11,7 +11,7 @@ function backupSuffix(response: { backup?: BackupNote; backupSkipped?: string })
 }
 
 type Engine = "mongodb" | "redis" | "valkey" | "elasticsearch";
-type Mode = "insert" | "update" | "delete";
+type Mode = "insert" | "update" | "delete" | "bulk";
 
 const inputClass = "h-8 w-full rounded-md border border-slate-300 bg-white px-2.5 font-mono text-[12px] text-slate-800 outline-none focus:border-brand-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100";
 const areaClass = "w-full flex-1 min-h-[140px] rounded-md border border-slate-300 bg-white p-2.5 font-mono text-[12px] text-slate-800 outline-none focus:border-brand-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100";
@@ -40,6 +40,12 @@ export default function NoSqlWriteDialog({ connectionId, engine, database, txnId
   const [filter, setFilter] = useState('{\n  \n}');
   const [update, setUpdate] = useState('{\n  "$set": {}\n}');
 
+  // Insert-mode toggle for MongoDB/Elasticsearch: switches the single
+  // document textarea to a JSON array, sent through insertMany/bulkIndex
+  // instead of insert/index.
+  const [bulk, setBulk] = useState(false);
+  const [bulkDocuments, setBulkDocuments] = useState('[\n  \n]');
+
   const [index, setIndex] = useState("");
   const [id, setId] = useState("");
 
@@ -48,6 +54,9 @@ export default function NoSqlWriteDialog({ connectionId, engine, database, txnId
   const [field, setField] = useState("");
   const [value, setValue] = useState("");
   const [ttl, setTtl] = useState("");
+
+  // Redis/Valkey's own bulk mode: a JSON array of writes, run as one pipeline.
+  const [bulkWrites, setBulkWrites] = useState('[\n  { "key": "", "type": "string", "value": "" }\n]');
   const shared = useShared();
   const backup = mode !== "insert" && !shared && rowBackupEnabled();
   // Redis has no distinct update mode — "Set" (mode "insert") can overwrite
@@ -62,7 +71,12 @@ export default function NoSqlWriteDialog({ connectionId, engine, database, txnId
     try {
       if (engine === "mongodb") {
         if (!collection.trim()) throw new Error("Collection is required");
-        if (mode === "insert") {
+        if (mode === "insert" && bulk && !txnId) {
+          const documents = parseJSON("Documents", bulkDocuments);
+          if (!Array.isArray(documents)) throw new Error("Documents must be a JSON array");
+          const response = await mongoInsertMany(connectionId, { database, collection, documents });
+          setResult(`Inserted ${response.ids.length} document(s).`);
+        } else if (mode === "insert") {
           const response = txnId
             ? await mongoTxnInsert(connectionId, txnId, { collection, document: parseJSON("Document", document) })
             : await mongoInsert(connectionId, { database, collection, document: parseJSON("Document", document) });
@@ -79,17 +93,31 @@ export default function NoSqlWriteDialog({ connectionId, engine, database, txnId
           setResult(`Deleted ${response.deletedCount}.${backupSuffix(response)}`);
         }
       } else if (engine === "elasticsearch") {
-        if (!index.trim() || !id.trim()) throw new Error("Index and id are required");
-        if (mode === "insert") {
+        if (!index.trim()) throw new Error("Index is required");
+        if (mode === "insert" && bulk) {
+          const documents = parseJSON("Documents", bulkDocuments);
+          if (!Array.isArray(documents)) throw new Error("Documents must be a JSON array");
+          const response = await elasticsearchBulkIndex(connectionId, { index, documents: documents.map((doc) => ({ document: doc })) });
+          const errorNote = response.errors?.length ? ` ${response.errors.length} failed.` : "";
+          setResult(`Indexed ${response.ids.length} document(s).${errorNote}`);
+        } else if (mode === "insert") {
+          if (!id.trim()) throw new Error("Index and id are required");
           const response = await elasticsearchIndex(connectionId, { index, id, document: parseJSON("Document", document) });
           setResult(`Indexed _id: ${response.id}`);
         } else if (mode === "update") {
+          if (!id.trim()) throw new Error("Index and id are required");
           const response = await elasticsearchUpdate(connectionId, { index, id, doc: parseJSON("Doc", update), backup });
           setResult(`Updated.${backupSuffix(response)}`);
         } else {
+          if (!id.trim()) throw new Error("Index and id are required");
           const response = await elasticsearchDelete(connectionId, { index, id, backup });
           setResult(`Deleted.${backupSuffix(response)}`);
         }
+      } else if (mode === "bulk") {
+        const writes = parseJSON("Writes", bulkWrites);
+        if (!Array.isArray(writes)) throw new Error("Writes must be a JSON array");
+        const response = await redisBulkWrite(connectionId, { database, writes });
+        setResult(`Written ${response.written} key(s).`);
       } else {
         if (!key.trim()) throw new Error("Key is required");
         if (mode === "delete") {
@@ -112,7 +140,7 @@ export default function NoSqlWriteDialog({ connectionId, engine, database, txnId
   }
 
   const modes: { key: Mode; label: string }[] = engine === "redis" || engine === "valkey"
-    ? [{ key: "insert", label: "Set" }, { key: "delete", label: "Delete" }]
+    ? [{ key: "insert", label: "Set" }, { key: "bulk", label: "Bulk" }, { key: "delete", label: "Delete" }]
     : [{ key: "insert", label: "Insert" }, { key: "update", label: "Update" }, { key: "delete", label: "Delete" }];
 
   return (
@@ -126,9 +154,23 @@ export default function NoSqlWriteDialog({ connectionId, engine, database, txnId
         <div className="flex gap-1.5">{modes.map((m) => <button key={m.key} className={tabClass(mode === m.key)} onClick={() => { setMode(m.key); setError(""); setResult(""); }}>{m.label}</button>)}</div>
 
         {engine === "mongodb" && <input className={inputClass} placeholder="Collection" value={collection} onChange={(e) => setCollection(e.target.value)} />}
-        {engine === "elasticsearch" && <div className="flex gap-2"><input className={inputClass} placeholder="Index" value={index} onChange={(e) => setIndex(e.target.value)} /><input className={inputClass} placeholder="Document _id" value={id} onChange={(e) => setId(e.target.value)} /></div>}
+        {engine === "elasticsearch" && <div className="flex gap-2">
+          <input className={inputClass} placeholder="Index" value={index} onChange={(e) => setIndex(e.target.value)} />
+          {!(mode === "insert" && bulk) && <input className={inputClass} placeholder="Document _id" value={id} onChange={(e) => setId(e.target.value)} />}
+        </div>}
+        {(engine === "mongodb" || engine === "elasticsearch") && mode === "insert" && !txnId && (
+          <label className="flex items-center gap-1.5 text-[11px] text-slate-500">
+            <input type="checkbox" checked={bulk} onChange={(e) => { setBulk(e.target.checked); setError(""); setResult(""); }} />
+            Bulk insert several documents (JSON array, up to 10,000)
+          </label>
+        )}
 
-        {(engine === "redis" || engine === "valkey") && <div className="flex flex-col gap-2">
+        {(engine === "redis" || engine === "valkey") && mode === "bulk" && <div className="flex min-h-0 flex-1 flex-col gap-2">
+          <label className="text-[11px] text-slate-500">Writes (JSON array, up to 10,000) — no row backup is taken for a bulk write</label>
+          <textarea className={areaClass} spellCheck={false} value={bulkWrites} onChange={(e) => setBulkWrites(e.target.value)} />
+        </div>}
+
+        {(engine === "redis" || engine === "valkey") && mode !== "bulk" && <div className="flex flex-col gap-2">
           <input className={inputClass} placeholder="Key" value={key} onChange={(e) => setKey(e.target.value)} />
           {mode !== "delete" && <>
             <div className="flex gap-1.5">
@@ -142,7 +184,8 @@ export default function NoSqlWriteDialog({ connectionId, engine, database, txnId
         </div>}
 
         {engine !== "redis" && engine !== "valkey" && <div className="flex min-h-0 flex-1 flex-col gap-2">
-          {mode === "insert" && <><label className="text-[11px] text-slate-500">Document</label><textarea className={areaClass} spellCheck={false} value={document} onChange={(e) => setDocument(e.target.value)} /></>}
+          {mode === "insert" && bulk && !txnId && <><label className="text-[11px] text-slate-500">Documents</label><textarea className={areaClass} spellCheck={false} value={bulkDocuments} onChange={(e) => setBulkDocuments(e.target.value)} /></>}
+          {mode === "insert" && (!bulk || txnId) && <><label className="text-[11px] text-slate-500">Document</label><textarea className={areaClass} spellCheck={false} value={document} onChange={(e) => setDocument(e.target.value)} /></>}
           {mode === "update" && <>
             <label className="text-[11px] text-slate-500">Filter{engine === "mongodb" ? " (matches one document)" : ""}</label>
             {engine === "mongodb" && <textarea className={areaClass} style={{ minHeight: 70 }} spellCheck={false} value={filter} onChange={(e) => setFilter(e.target.value)} />}

@@ -219,6 +219,10 @@ interface WithBackup {
   backupBlocked?: string;
 }
 
+export function mongoInsertMany(connectionId: string, request: { database?: string; collection: string; documents: unknown[] }) {
+  return api<{ ids: unknown[]; durationMs: number }>(`/connections/${connectionId}/documents/insertMany`, { method: "POST", body: JSON.stringify(request) });
+}
+
 export function mongoUpdate(connectionId: string, request: { database?: string; collection: string; filter: unknown; update: unknown; backup?: boolean }) {
   return api<{ matchedCount: number; modifiedCount: number; durationMs: number } & WithBackup>(`/connections/${connectionId}/documents/update`, { method: "POST", body: JSON.stringify(request) });
 }
@@ -257,12 +261,20 @@ export function redisWrite(connectionId: string, request: { database?: string; k
   return api<{ durationMs: number } & WithBackup>(`/connections/${connectionId}/redis/write`, { method: "POST", body: JSON.stringify(request) });
 }
 
+export function redisBulkWrite(connectionId: string, request: { database?: string; writes: { key: string; type: "string" | "hash"; field?: string; value: string; ttlSeconds?: number }[] }) {
+  return api<{ written: number; durationMs: number }>(`/connections/${connectionId}/redis/bulkWrite`, { method: "POST", body: JSON.stringify(request) });
+}
+
 export function redisDelete(connectionId: string, request: { database?: string; key: string; backup?: boolean }) {
   return api<{ deletedCount: number; durationMs: number } & WithBackup>(`/connections/${connectionId}/redis/delete`, { method: "POST", body: JSON.stringify(request) });
 }
 
 export function elasticsearchIndex(connectionId: string, request: { index: string; id: string; document: unknown }) {
   return api<{ id: string; durationMs: number }>(`/connections/${connectionId}/elasticsearch/index`, { method: "POST", body: JSON.stringify(request) });
+}
+
+export function elasticsearchBulkIndex(connectionId: string, request: { index: string; documents: { id?: string; document: unknown }[] }) {
+  return api<{ ids: string[]; errors?: string[]; durationMs: number }>(`/connections/${connectionId}/elasticsearch/bulkIndex`, { method: "POST", body: JSON.stringify(request) });
 }
 
 export function elasticsearchUpdate(connectionId: string, request: { index: string; id: string; doc: unknown; backup?: boolean }) {

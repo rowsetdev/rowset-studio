@@ -254,6 +254,58 @@ func (m *Manager) RedisWrite(ctx context.Context, connection Connection, input R
 	}
 }
 
+type RedisBulkWriteInput struct {
+	Database string            `json:"database"`
+	Writes   []RedisWriteInput `json:"writes"`
+}
+
+// RedisBulkWrite runs several string/hash writes in one pipeline (up to
+// 10,000), the same "no bulk APIs" limit row backups and CSV import use.
+// Every write is validated before any of them run, so a bad entry never
+// leaves some keys written and others not.
+func (m *Manager) RedisBulkWrite(ctx context.Context, connection Connection, input RedisBulkWriteInput) error {
+	if len(input.Writes) == 0 {
+		return errors.New("at least one write is required")
+	}
+	if len(input.Writes) > 10000 {
+		return errors.New("at most 10000 writes can run at once")
+	}
+	for i, write := range input.Writes {
+		if strings.TrimSpace(write.Key) == "" {
+			return fmt.Errorf("write %d: key is required", i+1)
+		}
+		if write.TTLSeconds < 0 {
+			return fmt.Errorf("write %d: ttlSeconds must be zero or positive", i+1)
+		}
+		if write.Type == "hash" && strings.TrimSpace(write.Field) == "" {
+			return fmt.Errorf("write %d: field is required for hash writes", i+1)
+		}
+		if write.Type != "string" && write.Type != "hash" {
+			return fmt.Errorf("write %d: writing a %q key is not supported yet; only string and hash are", i+1, write.Type)
+		}
+	}
+	client, cleanup, err := redisClient(ctx, connection)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	_, err = client.Pipelined(ctx, func(pipe goredis.Pipeliner) error {
+		for _, write := range input.Writes {
+			switch write.Type {
+			case "string":
+				pipe.Set(ctx, write.Key, write.Value, time.Duration(write.TTLSeconds)*time.Second)
+			case "hash":
+				pipe.HSet(ctx, write.Key, write.Field, write.Value)
+				if write.TTLSeconds > 0 {
+					pipe.Expire(ctx, write.Key, time.Duration(write.TTLSeconds)*time.Second)
+				}
+			}
+		}
+		return nil
+	})
+	return err
+}
+
 type RedisDeleteInput struct {
 	Database string `json:"database"`
 	Key      string `json:"key"`

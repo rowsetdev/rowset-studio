@@ -195,6 +195,91 @@ func (m *Manager) ElasticsearchIndex(ctx context.Context, connection Connection,
 	return id, nil
 }
 
+// ElasticsearchBulkDoc is one document for ElasticsearchBulkIndex. ID is
+// optional, unlike ElasticsearchIndex's: a bulk index commonly lets
+// Elasticsearch generate ids itself.
+type ElasticsearchBulkDoc struct {
+	ID       string          `json:"id"`
+	Document json.RawMessage `json:"document"`
+}
+
+type ElasticsearchBulkIndexInput struct {
+	Index     string                 `json:"index"`
+	Documents []ElasticsearchBulkDoc `json:"documents"`
+}
+
+type ElasticsearchBulkIndexResult struct {
+	IDs    []string `json:"ids"`
+	Errors []string `json:"errors,omitempty"`
+}
+
+// ElasticsearchBulkIndex indexes several documents in one _bulk request (up
+// to 10,000), the same "no bulk APIs" limit row backups and CSV import use.
+// A per-document failure (e.g. a mapping conflict) doesn't fail the whole
+// call: it's reported in Errors, the same way _bulk itself reports it.
+func (m *Manager) ElasticsearchBulkIndex(ctx context.Context, connection Connection, input ElasticsearchBulkIndexInput) (ElasticsearchBulkIndexResult, error) {
+	if strings.TrimSpace(input.Index) == "" {
+		return ElasticsearchBulkIndexResult{}, errors.New("index is required")
+	}
+	if len(input.Documents) == 0 {
+		return ElasticsearchBulkIndexResult{}, errors.New("at least one document is required")
+	}
+	if len(input.Documents) > 10000 {
+		return ElasticsearchBulkIndexResult{}, errors.New("at most 10000 documents can be indexed at once")
+	}
+	var body bytes.Buffer
+	for i, doc := range input.Documents {
+		if len(doc.Document) == 0 {
+			return ElasticsearchBulkIndexResult{}, fmt.Errorf("document %d: document is required", i+1)
+		}
+		var probe any
+		if err := json.Unmarshal(doc.Document, &probe); err != nil {
+			return ElasticsearchBulkIndexResult{}, fmt.Errorf("document %d must be a JSON object: %w", i+1, err)
+		}
+		meta := map[string]string{}
+		if strings.TrimSpace(doc.ID) != "" {
+			meta["_id"] = doc.ID
+		}
+		action, err := json.Marshal(map[string]any{"index": meta})
+		if err != nil {
+			return ElasticsearchBulkIndexResult{}, err
+		}
+		body.Write(action)
+		body.WriteByte('\n')
+		body.Write(doc.Document)
+		body.WriteByte('\n')
+	}
+	client, cleanup, err := elasticsearchClient(ctx, connection)
+	if err != nil {
+		return ElasticsearchBulkIndexResult{}, err
+	}
+	defer cleanup()
+	res, err := client.Bulk(bytes.NewReader(body.Bytes()), client.Bulk.WithContext(ctx), client.Bulk.WithIndex(input.Index))
+	decoded, err := esRequest(ctx, client, res, err)
+	if err != nil {
+		return ElasticsearchBulkIndexResult{}, err
+	}
+	items, _ := decoded["items"].([]any)
+	result := ElasticsearchBulkIndexResult{IDs: make([]string, 0, len(items))}
+	for i, raw := range items {
+		entry, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		action, ok := entry["index"].(map[string]any)
+		if !ok {
+			continue
+		}
+		if id, ok := action["_id"].(string); ok {
+			result.IDs = append(result.IDs, id)
+		}
+		if errInfo, ok := action["error"]; ok && errInfo != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("document %d: %v", i+1, errInfo))
+		}
+	}
+	return result, nil
+}
+
 type ElasticsearchUpdateInput struct {
 	Index string          `json:"index"`
 	ID    string          `json:"id"`

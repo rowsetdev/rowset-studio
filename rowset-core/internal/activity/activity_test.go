@@ -79,6 +79,9 @@ func (s *slowStore) ListQueryHistory(context.Context, string, string, *string, *
 func (s *slowStore) Purge(context.Context, *uint32, *uint32) (uint64, uint64, error) {
 	return 0, 0, nil
 }
+func (s *slowStore) VerifyAuditChain(context.Context) ([]store.ChainBreak, int, error) {
+	return nil, 0, nil
+}
 
 func TestBufferedNeverDropsARecordWhenTheQueueIsFull(t *testing.T) {
 	backend := &slowStore{release: make(chan struct{})}

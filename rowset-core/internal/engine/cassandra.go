@@ -445,8 +445,14 @@ func cassandraDDL(ctx context.Context, connection Connection, kind, keyspace, na
 		partition[i] = quote(column.Name)
 	}
 	clustering := make([]string, len(table.ClusteringColumns))
+	clusteringOrder := make([]string, len(table.ClusteringColumns))
 	for i, column := range table.ClusteringColumns {
 		clustering[i] = quote(column.Name)
+		order := "ASC"
+		if strings.EqualFold(column.ClusteringOrder, "desc") {
+			order = "DESC"
+		}
+		clusteringOrder[i] = quote(column.Name) + " " + order
 	}
 	primary := strings.Join(partition, ", ")
 	if len(partition) > 1 {
@@ -456,7 +462,11 @@ func cassandraDDL(ctx context.Context, connection Connection, kind, keyspace, na
 		primary += ", " + strings.Join(clustering, ", ")
 	}
 	columns = append(columns, "  PRIMARY KEY ("+primary+")")
-	return "CREATE TABLE " + quote(keyspace) + "." + quote(name) + " (\n" + strings.Join(columns, ",\n") + "\n);", nil
+	ddl := "CREATE TABLE " + quote(keyspace) + "." + quote(name) + " (\n" + strings.Join(columns, ",\n") + "\n)"
+	if len(clusteringOrder) > 0 {
+		ddl += "\nWITH CLUSTERING ORDER BY (" + strings.Join(clusteringOrder, ", ") + ")"
+	}
+	return ddl + ";", nil
 }
 
 func cqlTypeName(info gocql.TypeInfo) string {

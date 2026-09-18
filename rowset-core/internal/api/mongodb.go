@@ -208,6 +208,62 @@ func (s *Server) mongoInsert(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"id": json.RawMessage(id), "durationMs": duration})
 }
 
+// mongoInsertMany is mongoInsert for several documents in one write (up to
+// 10,000), the same "no bulk APIs" limit row backups and CSV import use.
+func (s *Server) mongoInsertMany(w http.ResponseWriter, r *http.Request) {
+	connection, ok := s.authorizedConnection(w, r)
+	if !ok {
+		return
+	}
+	identity := identityFromContext(r.Context())
+	if connection.Engine != "mongodb" || s.config.Shared || !identity.IsAdmin() {
+		writeError(w, 403, "UNSUPPORTED", "document writes are available to personal workspace administrators only")
+		return
+	}
+	var input engine.MongoInsertManyInput
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	input.Collection = strings.TrimSpace(input.Collection)
+	if input.Collection == "" {
+		writeError(w, 400, "BAD_REQUEST", "collection is required")
+		return
+	}
+	if len(input.Documents) == 0 {
+		writeError(w, 400, "BAD_REQUEST", "at least one document is required")
+		return
+	}
+	if len(input.Documents) > 10000 {
+		writeError(w, 400, "BAD_REQUEST", "at most 10000 documents can be inserted at once")
+		return
+	}
+	database := input.Database
+	if database == "" {
+		database = connection.Database
+	}
+	info := nosqlStatement(sqlguard.Insert, database, input.Collection, false)
+	raw, _ := json.Marshal(input)
+	target, ctx, cancel, run := s.nosqlWriteGuard(w, r, connection, database, info, string(raw))
+	if !run {
+		return
+	}
+	defer cancel()
+	started := time.Now()
+	ids, err := s.engines.MongoInsertMany(ctx, target, input)
+	duration := time.Since(started).Milliseconds()
+	if err != nil {
+		s.recordActivity(r, connection.ID, string(raw), "error", 0, duration, "", "", auditMeta{decision: "allow", errorMessage: err.Error()})
+		writeError(w, 502, "EXEC_ERROR", err.Error())
+		return
+	}
+	rawIDs := make([]json.RawMessage, len(ids))
+	for i, id := range ids {
+		rawIDs[i] = json.RawMessage(id)
+	}
+	s.recordActivity(r, connection.ID, string(raw), "success", int64(len(ids)), duration, "", "", auditMeta{decision: "allow"})
+	writeJSON(w, 200, map[string]any{"ids": rawIDs, "durationMs": duration})
+}
+
 func (s *Server) mongoUpdate(w http.ResponseWriter, r *http.Request) {
 	connection, ok := s.authorizedConnection(w, r)
 	if !ok {

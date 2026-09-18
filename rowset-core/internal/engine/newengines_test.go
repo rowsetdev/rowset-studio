@@ -250,6 +250,20 @@ func TestLiveCassandra(t *testing.T) {
 	if err != nil || !strings.Contains(ddl, "CREATE TABLE") || !strings.Contains(ddl, "PRIMARY KEY") {
 		t.Fatalf("ddl: %q err=%v", ddl, err)
 	}
+	// A table with a descending clustering column must round-trip: re-running
+	// the generated DDL has to recreate the same order, not silently default
+	// to ascending (a past bug — cassandraDDL used to read only the
+	// clustering column names, never their ClusteringOrder).
+	if _, err := manager.CassandraQuery(ctx, c, CassandraQueryInput{Keyspace: "rowset_probe", Query: "CREATE TABLE IF NOT EXISTS clustered (id int, ts timeuuid, label text, PRIMARY KEY (id, ts)) WITH CLUSTERING ORDER BY (ts DESC)", Limit: 10}); err != nil {
+		t.Fatalf("creating clustered table: %v", err)
+	}
+	clusteredDDL, err := cassandraDDL(ctx, c, "table", "rowset_probe", "clustered")
+	if err != nil {
+		t.Fatalf("clustered ddl: %v", err)
+	}
+	if !strings.Contains(clusteredDDL, "CLUSTERING ORDER BY") || !strings.Contains(clusteredDDL, `"ts" DESC`) {
+		t.Fatalf("expected DESC clustering order to survive Show DDL, got: %q", clusteredDDL)
+	}
 	if err := manager.ValidateCassandraCQLExport(ctx, c, "rowset_probe", "items"); err != nil {
 		t.Fatalf("CQL export validation: %v", err)
 	}

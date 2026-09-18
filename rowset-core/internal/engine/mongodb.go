@@ -175,6 +175,52 @@ func mongoInsertOneWith(ctx context.Context, client *mongo.Client, database stri
 	return marshalExtJSONValue(result.InsertedID)
 }
 
+type MongoInsertManyInput struct {
+	Database   string            `json:"database"`
+	Collection string            `json:"collection"`
+	Documents  []json.RawMessage `json:"documents"`
+}
+
+// MongoInsertMany inserts several documents in one write, returning each
+// inserted _id as Extended JSON, in the same order as Documents.
+func (m *Manager) MongoInsertMany(ctx context.Context, connection Connection, input MongoInsertManyInput) ([]string, error) {
+	if strings.TrimSpace(input.Collection) == "" {
+		return nil, errors.New("collection is required")
+	}
+	if len(input.Documents) == 0 {
+		return nil, errors.New("at least one document is required")
+	}
+	if len(input.Documents) > 10000 {
+		return nil, errors.New("at most 10000 documents can be inserted at once")
+	}
+	docs := make([]any, len(input.Documents))
+	for i, raw := range input.Documents {
+		var document bson.D
+		if err := bson.UnmarshalExtJSON(raw, false, &document); err != nil {
+			return nil, fmt.Errorf("document %d must be an Extended JSON object: %w", i+1, err)
+		}
+		docs[i] = document
+	}
+	client, cleanup, err := mongoClient(ctx, connection)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+	result, err := client.Database(connection.Database).Collection(input.Collection).InsertMany(ctx, docs)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, len(result.InsertedIDs))
+	for i, id := range result.InsertedIDs {
+		encoded, err := marshalExtJSONValue(id)
+		if err != nil {
+			return nil, err
+		}
+		ids[i] = encoded
+	}
+	return ids, nil
+}
+
 // marshalExtJSONValue Extended-JSON-encodes a single BSON value (as opposed
 // to a whole document). bson.MarshalExtJSON only writes documents; asked to
 // write a bare scalar like an ObjectID at the top level, the value writer

@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -130,6 +131,56 @@ func (s *Server) redisWrite(w http.ResponseWriter, r *http.Request) {
 	}
 	s.recordActivity(r, connection.ID, string(raw), "success", 1, duration, "", "", auditMeta{decision: "allow"})
 	writeJSON(w, 200, backupAnnotations.addTo(map[string]any{"durationMs": duration}))
+}
+
+// redisBulkWrite is redisWrite for several keys in one pipelined write (up
+// to 10,000). No row backup: capturing a DUMP per key here could mean
+// thousands of snapshots for one bulk write, which the SQL/Mongo bulk paths
+// don't do either.
+func (s *Server) redisBulkWrite(w http.ResponseWriter, r *http.Request) {
+	connection, ok := s.authorizedConnection(w, r)
+	if !ok {
+		return
+	}
+	identity := identityFromContext(r.Context())
+	if connection.Engine != "redis" && connection.Engine != "valkey" || s.config.Shared || !identity.IsAdmin() {
+		writeError(w, 403, "UNSUPPORTED", "key writes are available to personal workspace administrators only")
+		return
+	}
+	var input engine.RedisBulkWriteInput
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	if len(input.Writes) == 0 {
+		writeError(w, 400, "BAD_REQUEST", "at least one write is required")
+		return
+	}
+	if len(input.Writes) > 10000 {
+		writeError(w, 400, "BAD_REQUEST", "at most 10000 writes can run at once")
+		return
+	}
+	database := input.Database
+	if database == "" {
+		database = connection.Database
+	}
+	// Classified the same way one write is: a named key, always scoped.
+	info := nosqlStatement(sqlguard.Update, database, fmt.Sprintf("%d keys", len(input.Writes)), true)
+	raw, _ := json.Marshal(input)
+	target, ctx, cancel, run := s.nosqlWriteGuard(w, r, connection, database, info, string(raw))
+	if !run {
+		return
+	}
+	defer cancel()
+	started := time.Now()
+	err := s.engines.RedisBulkWrite(ctx, target, input)
+	duration := time.Since(started).Milliseconds()
+	if err != nil {
+		s.recordActivity(r, connection.ID, string(raw), "error", 0, duration, "", "", auditMeta{decision: "allow", errorMessage: err.Error()})
+		writeError(w, 502, "EXEC_ERROR", err.Error())
+		return
+	}
+	s.recordActivity(r, connection.ID, string(raw), "success", int64(len(input.Writes)), duration, "", "", auditMeta{decision: "allow"})
+	writeJSON(w, 200, map[string]any{"written": len(input.Writes), "durationMs": duration})
 }
 
 func (s *Server) redisDelete(w http.ResponseWriter, r *http.Request) {

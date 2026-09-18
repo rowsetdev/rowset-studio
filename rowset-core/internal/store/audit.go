@@ -33,6 +33,61 @@ func PrepareAudit(previous string, item domain.AuditLog) domain.AuditLog {
 func VerifyPreparedAudit(version int64, previous, expected string, item domain.AuditLog) bool {
 	return (version == 1 || version == currentAuditHashVersion) && auditHash(version, previous, item) == expected
 }
+
+// ChainBreak identifies the first audit entry whose hash no longer matches
+// what it was written with — either the entry itself or the entry it chains
+// from was altered after the fact.
+type ChainBreak struct {
+	OrgID   string
+	AuditID string
+}
+
+const auditChainScanQuery = "SELECT id, org_id, user_id, connection_id, query_hash, started_at, policy_decision, sql, error_message, client_ip, rows_returned, rows_affected, prev_hash, entry_hash, hash_version FROM audit_logs WHERE org_id IS NOT NULL AND entry_hash IS NOT NULL ORDER BY org_id, rowid"
+
+// VerifyAuditChain walks every organization's audit hash chain in insertion
+// order and confirms each entry's hash still matches what PrepareAudit wrote
+// for it, chained from the previous entry's hash. It reports the first break
+// per organization (there is no point reporting every entry after a tampered
+// one, since a single edit invalidates the rest of that org's chain too) and
+// how many entries were checked in total.
+func (s *Store) VerifyAuditChain(ctx context.Context) ([]ChainBreak, int, error) {
+	rows, err := s.db.QueryContext(ctx, auditChainScanQuery)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	var breaks []ChainBreak
+	broken := map[string]bool{}
+	previous := map[string]string{}
+	checked := 0
+	for rows.Next() {
+		var item domain.AuditLog
+		var orgID, userID, connectionID, queryHash, startedAt, policyDecision, sqlText, errorMessage, clientIP, prevHash sql.NullString
+		var rowsReturned, rowsAffected sql.NullInt64
+		if err := rows.Scan(&item.ID, &orgID, &userID, &connectionID, &queryHash, &startedAt, &policyDecision, &sqlText, &errorMessage, &clientIP, &rowsReturned, &rowsAffected, &prevHash, &item.EntryHash, &item.HashVersion); err != nil {
+			return nil, 0, err
+		}
+		item.OrgID, item.UserID, item.ConnectionID, item.QueryHash = orgID.String, userID.String, connectionID.String, queryHash.String
+		item.StartedAt, item.PolicyDecision, item.SQL, item.ErrorMessage, item.ClientIP = startedAt.String, policyDecision.String, sqlText.String, errorMessage.String, clientIP.String
+		item.RowsReturned, item.RowsReturnedSet = rowsReturned.Int64, rowsReturned.Valid
+		item.RowsAffected, item.RowsAffectedSet = rowsAffected.Int64, rowsAffected.Valid
+		checked++
+		if broken[item.OrgID] {
+			continue
+		}
+		expectedPrevious := previous[item.OrgID]
+		if prevHash.String != expectedPrevious || !VerifyPreparedAudit(item.HashVersion, prevHash.String, item.EntryHash, item) {
+			broken[item.OrgID] = true
+			breaks = append(breaks, ChainBreak{OrgID: item.OrgID, AuditID: item.ID})
+			continue
+		}
+		previous[item.OrgID] = item.EntryHash
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	return breaks, checked, nil
+}
 func optionalNumber(value int64, set bool) string {
 	if !set {
 		return ""

@@ -125,6 +125,59 @@ func (s *Server) elasticsearchIndex(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"id": id, "durationMs": duration})
 }
 
+// elasticsearchBulkIndex is elasticsearchIndex for several documents in one
+// _bulk request (up to 10,000), the same "no bulk APIs" limit row backups
+// and CSV import use.
+func (s *Server) elasticsearchBulkIndex(w http.ResponseWriter, r *http.Request) {
+	connection, ok := s.authorizedConnection(w, r)
+	if !ok {
+		return
+	}
+	identity := identityFromContext(r.Context())
+	if connection.Engine != "elasticsearch" || s.config.Shared || !identity.IsAdmin() {
+		writeError(w, 403, "UNSUPPORTED", "document writes are available to personal workspace administrators only")
+		return
+	}
+	var input engine.ElasticsearchBulkIndexInput
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	input.Index = strings.TrimSpace(input.Index)
+	if input.Index == "" {
+		writeError(w, 400, "BAD_REQUEST", "index is required")
+		return
+	}
+	if len(input.Documents) == 0 {
+		writeError(w, 400, "BAD_REQUEST", "at least one document is required")
+		return
+	}
+	if len(input.Documents) > 10000 {
+		writeError(w, 400, "BAD_REQUEST", "at most 10000 documents can be indexed at once")
+		return
+	}
+	database := connection.Database
+	if database == "" {
+		database = "elasticsearch"
+	}
+	info := nosqlStatement(sqlguard.Insert, database, input.Index, false)
+	raw, _ := json.Marshal(input)
+	target, ctx, cancel, run := s.nosqlWriteGuard(w, r, connection, database, info, string(raw))
+	if !run {
+		return
+	}
+	defer cancel()
+	started := time.Now()
+	result, err := s.engines.ElasticsearchBulkIndex(ctx, target, input)
+	duration := time.Since(started).Milliseconds()
+	if err != nil {
+		s.recordActivity(r, connection.ID, string(raw), "error", 0, duration, "", "", auditMeta{decision: "allow", errorMessage: err.Error()})
+		writeError(w, 502, "EXEC_ERROR", err.Error())
+		return
+	}
+	s.recordActivity(r, connection.ID, string(raw), "success", int64(len(result.IDs)), duration, "", "", auditMeta{decision: "allow"})
+	writeJSON(w, 200, map[string]any{"ids": result.IDs, "errors": result.Errors, "durationMs": duration})
+}
+
 func (s *Server) elasticsearchUpdate(w http.ResponseWriter, r *http.Request) {
 	connection, ok := s.authorizedConnection(w, r)
 	if !ok {

@@ -5,6 +5,46 @@ and `scripts/package-macos.sh` stamp it into Studio (sidebar), the `rowset`
 executable and the macOS app. Every change set bumps the patch version and adds
 an entry here.
 
+## 0.0.100 — 2026-09-18
+
+- Fixed: exporting a binary/blob/bit column to SQL format (or a scheduled SQL
+  export) on MySQL or MSSQL produced a literal that re-imported as the wrong
+  bytes — `sqlValueLiteral` quoted the hex-encoded value as a plain string
+  (`'\xdeadbeef'` on MySQL, `N'\xdeadbeef'` on MSSQL) instead of that engine's
+  binary-literal syntax (`X'deadbeef'`, `0xdeadbeef`), unlike the row-backup
+  restore and CSV import code paths which already handled this correctly.
+  Verified live against real MySQL and MSSQL containers: a `VARBINARY`
+  column now round-trips byte-for-byte through export → reimport.
+- Fixed: Cassandra's "Show DDL" for a table dropped `DESC` clustering order
+  entirely — it read the clustering column names but never their
+  `ClusteringOrder`, so re-running the generated DDL silently recreated the
+  table with ascending order. Now emits `WITH CLUSTERING ORDER BY (...)`.
+  Verified live against a real Cassandra container.
+- Fixed: the audit log's SHA-256 hash chain (tamper-evidence) was written
+  correctly but never verified — `VerifyPreparedAudit` existed but nothing
+  ever called it. Added `Store.VerifyAuditChain`, wired into a daily
+  background check (`auditIntegrityCheck`) that walks every organization's
+  chain and logs an error if an entry no longer matches what it was written
+  with. Verified with a direct-database tampering test.
+
+## 0.0.99 — 2026-09-18
+
+- Added: bulk write endpoints for MongoDB (`insertMany`), Redis/Valkey
+  (`bulkWrite`, pipelined) and Elasticsearch (`bulkIndex`, via `_bulk`) —
+  up to 10,000 items per call, the same cap row backups and CSV import use.
+  Redis validates every write before any of them run, so a bad entry never
+  leaves some keys written and others not; Elasticsearch reports
+  per-document failures instead of failing the whole batch. Wired into the
+  write dialog: MongoDB/Elasticsearch get a "Bulk insert" checkbox that
+  swaps the document textarea for a JSON array, Redis/Valkey gets its own
+  "Bulk" tab. Not available inside an open MongoDB transaction, and Redis
+  bulk writes skip row backup (a DUMP per key would mean thousands of
+  snapshots for one call).
+- Also fixed: the auto-refresh and "more" toolbar menus in the query editor
+  were `absolute`-positioned inside the editor pane, so on a narrow pane
+  they got clipped by the pane's own edge instead of the window's. Both now
+  render into a body-level portal at a viewport-clamped fixed position.
+
 ## 0.0.98 — 2026-09-18
 
 - Added: SSH tunnel support for MongoDB, Redis/Valkey and Elasticsearch,

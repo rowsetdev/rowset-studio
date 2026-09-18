@@ -16,6 +16,7 @@ type Store interface {
 	CreateQueryHistory(context.Context, domain.QueryHistory) error
 	ListQueryHistory(context.Context, string, string, *string, *string) ([]domain.QueryHistory, error)
 	Purge(context.Context, *uint32, *uint32) (uint64, uint64, error)
+	VerifyAuditChain(context.Context) ([]store.ChainBreak, int, error)
 }
 
 type SQLite struct{ Data *store.Store }
@@ -32,6 +33,9 @@ func (s SQLite) ListQueryHistory(ctx context.Context, userID, connectionID strin
 }
 func (s SQLite) Purge(ctx context.Context, auditDays, historyDays *uint32) (uint64, uint64, error) {
 	return s.Data.PurgeActivity(ctx, auditDays, historyDays)
+}
+func (s SQLite) VerifyAuditChain(ctx context.Context) ([]store.ChainBreak, int, error) {
+	return s.Data.VerifyAuditChain(ctx)
 }
 
 // writeBatch lets the buffered writer store a whole batch in one transaction.
@@ -308,4 +312,14 @@ func (b *Buffered) ListQueryHistory(ctx context.Context, userID, connectionID st
 
 func (b *Buffered) Purge(ctx context.Context, auditDays, historyDays *uint32) (uint64, uint64, error) {
 	return b.backend.Purge(ctx, auditDays, historyDays)
+}
+
+func (b *Buffered) VerifyAuditChain(ctx context.Context) ([]store.ChainBreak, int, error) {
+	waitCtx, cancel := context.WithTimeout(ctx, flushBeforeReadWait)
+	err := b.Flush(waitCtx)
+	cancel()
+	if err != nil && ctx.Err() != nil {
+		return nil, 0, ctx.Err()
+	}
+	return b.backend.VerifyAuditChain(ctx)
 }

@@ -433,6 +433,9 @@ func sqlValueLiteral(engine string, value any) string {
 	case float32, float64:
 		return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%f", v), "0"), ".")
 	case string:
+		if hexText(v) {
+			return hexLiteral(engine, v[2:])
+		}
 		return importLiteral(engine, v)
 	default:
 		return importLiteral(engine, fmt.Sprint(v))

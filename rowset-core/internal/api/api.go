@@ -57,6 +57,7 @@ type Server struct {
 	scheduleRuns        sync.WaitGroup
 	importMu            sync.Mutex
 	stopRetention       context.CancelFunc
+	stopAuditVerify     context.CancelFunc
 	imports             map[string]*csvUpload
 }
 
@@ -82,6 +83,9 @@ func NewWithActivity(cfg config.Config, data *store.Store, activityStore activit
 	// configuration another goroutine could still be setting up.
 	auditDays, historyDays := server.retentionPeriods()
 	go server.activityRetention(retentionContext, auditDays, historyDays)
+	auditVerifyContext, stopAuditVerify := context.WithCancel(context.Background())
+	server.stopAuditVerify = stopAuditVerify
+	go server.auditIntegrityCheck(auditVerifyContext)
 	server.scheduleRunning = map[string]bool{}
 	server.imports = map[string]*csvUpload{}
 	server.scheduleContext, server.stopSchedules = context.WithCancel(context.Background())
@@ -133,6 +137,9 @@ func (s *Server) Close() error {
 	if s.stopRetention != nil {
 		s.stopRetention()
 	}
+	if s.stopAuditVerify != nil {
+		s.stopAuditVerify()
+	}
 	// Queued activity is written before the store closes behind the server.
 	if closer, ok := s.activity.(interface{ Close() }); ok {
 		closer.Close()
@@ -180,6 +187,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/connections/{id}/documents/find", s.authenticated(http.HandlerFunc(s.mongoFind)))
 	mux.Handle("POST /api/connections/{id}/documents/aggregate", s.authenticated(http.HandlerFunc(s.mongoAggregate)))
 	mux.Handle("POST /api/connections/{id}/documents/insert", s.authenticated(http.HandlerFunc(s.mongoInsert)))
+	mux.Handle("POST /api/connections/{id}/documents/insertMany", s.authenticated(http.HandlerFunc(s.mongoInsertMany)))
 	mux.Handle("POST /api/connections/{id}/documents/update", s.authenticated(http.HandlerFunc(s.mongoUpdate)))
 	mux.Handle("POST /api/connections/{id}/documents/delete", s.authenticated(http.HandlerFunc(s.mongoDelete)))
 	mux.Handle("POST /api/connections/{id}/documents/txn/begin", s.authenticated(http.HandlerFunc(s.mongoBeginTransaction)))
@@ -190,10 +198,12 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/connections/{id}/documents/txn/{txn_id}/rollback", s.authenticated(http.HandlerFunc(s.mongoRollbackTransaction)))
 	mux.Handle("POST /api/connections/{id}/redis/scan", s.authenticated(http.HandlerFunc(s.redisScan)))
 	mux.Handle("POST /api/connections/{id}/redis/write", s.authenticated(http.HandlerFunc(s.redisWrite)))
+	mux.Handle("POST /api/connections/{id}/redis/bulkWrite", s.authenticated(http.HandlerFunc(s.redisBulkWrite)))
 	mux.Handle("POST /api/connections/{id}/redis/delete", s.authenticated(http.HandlerFunc(s.redisDelete)))
 	mux.Handle("POST /api/connections/{id}/cassandra/query", s.authenticated(http.HandlerFunc(s.cassandraQuery)))
 	mux.Handle("POST /api/connections/{id}/elasticsearch/search", s.authenticated(http.HandlerFunc(s.elasticsearchSearch)))
 	mux.Handle("POST /api/connections/{id}/elasticsearch/index", s.authenticated(http.HandlerFunc(s.elasticsearchIndex)))
+	mux.Handle("POST /api/connections/{id}/elasticsearch/bulkIndex", s.authenticated(http.HandlerFunc(s.elasticsearchBulkIndex)))
 	mux.Handle("POST /api/connections/{id}/elasticsearch/update", s.authenticated(http.HandlerFunc(s.elasticsearchUpdate)))
 	mux.Handle("POST /api/connections/{id}/elasticsearch/delete", s.authenticated(http.HandlerFunc(s.elasticsearchDelete)))
 	mux.Handle("POST /api/connections/{id}/query", s.authenticated(http.HandlerFunc(s.runQuery)))
