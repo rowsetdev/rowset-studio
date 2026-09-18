@@ -38,11 +38,11 @@ func EngineCapabilities(name string) Capabilities {
 		// Transactions require a replica set or mongos; a standalone
 		// mongod rejects the first write inside one with a clear driver
 		// error, surfaced as-is rather than hidden behind this flag.
-		return Capabilities{Transactions: true, DocumentWrite: true}
+		return Capabilities{Transactions: true, DocumentWrite: true, SSH: true}
 	case "elasticsearch":
-		return Capabilities{DocumentWrite: true}
+		return Capabilities{DocumentWrite: true, SSH: true}
 	case "redis", "valkey":
-		return Capabilities{KeyWrite: true}
+		return Capabilities{KeyWrite: true, SSH: true}
 	default:
 		return Capabilities{}
 	}

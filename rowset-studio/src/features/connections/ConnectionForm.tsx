@@ -355,7 +355,7 @@ export default function ConnectionForm({
             </div>
           </details>
         )}
-        {!fileEngine && !["mongodb", "redis", "valkey", "elasticsearch"].includes(form.engine) && <details className="rounded border border-slate-200 p-2 dark:border-slate-800" open={sshEnabled}>
+        {!fileEngine && <details className="rounded border border-slate-200 p-2 dark:border-slate-800" open={sshEnabled}>
           <summary className="cursor-pointer text-xs text-slate-600 dark:text-slate-300">SSH tunnel (optional)</summary>
           <div className="mt-2 space-y-3">
             <label className="flex items-center gap-2 text-[12px] text-slate-600 dark:text-slate-300">
@@ -411,12 +411,12 @@ export default function ConnectionForm({
           </div>
         </details>}
         {fileEngine && <p className="text-[12px] text-slate-500">Open an existing file on this computer. SQLite and DuckDB do not use network credentials. DuckDB requires a build with DuckDB support.</p>}
-        {form.engine === "mongodb" && <p className="text-[12px] text-slate-500">Browse collections, find documents and run read-only aggregation pipelines using Extended JSON, with single-document insert/update/delete. Manual-commit transactions need a replica set or mongos — a standalone server rejects them with a clear error. SRV URLs and SSH are not supported yet. Leave the username blank for an unauthenticated local server.</p>}
+        {form.engine === "mongodb" && <p className="text-[12px] text-slate-500">Browse collections, find documents and run read-only aggregation pipelines using Extended JSON, with single-document insert/update/delete. Manual-commit transactions need a replica set or mongos — a standalone server rejects them with a clear error. SRV URLs are not supported yet. Leave the username blank for an unauthenticated local server.</p>}
         {form.engine === "cockroachdb" && <p className="text-[12px] text-slate-500">CockroachDB is queried through its PostgreSQL wire protocol; SQL, schema browsing and HA nodes all work the same way they do for PostgreSQL.</p>}
-        {form.engine === "redis" && <p className="text-[12px] text-slate-500">Browse keys by pattern (string, hash, list, set, zset, stream). The Database field is a numeric index (0-15). String/hash key writes and delete are supported; SSH is not. Leave the username blank for an unauthenticated server.</p>}
-        {form.engine === "valkey" && <p className="text-[12px] text-slate-500">Valkey speaks the same protocol as Redis, so it works the same way here: browse keys by pattern, the Database field is a numeric index (0-15), string/hash key writes and delete are supported, SSH is not. Leave the username blank for an unauthenticated server.</p>}
+        {form.engine === "redis" && <p className="text-[12px] text-slate-500">Browse keys by pattern (string, hash, list, set, zset, stream). The Database field is a numeric index (0-15). String/hash key writes and delete are supported. Leave the username blank for an unauthenticated server.</p>}
+        {form.engine === "valkey" && <p className="text-[12px] text-slate-500">Valkey speaks the same protocol as Redis, so it works the same way here: browse keys by pattern, the Database field is a numeric index (0-15), string/hash key writes and delete are supported. Leave the username blank for an unauthenticated server.</p>}
         {form.engine === "cassandra" && <p className="text-[12px] text-slate-500">Runs policy-governed CQL reads, writes, DDL and batches. Add contact points with HA nodes; SSH, TLS, consistency and paging are supported.</p>}
-        {form.engine === "elasticsearch" && <p className="text-[12px] text-slate-500">Searches one index at a time with a JSON query body and supports single-document index/update/delete. Aggregations across indices and SSH are not supported yet.</p>}
+        {form.engine === "elasticsearch" && <p className="text-[12px] text-slate-500">Searches one index at a time with a JSON query body and supports single-document index/update/delete. Aggregations across indices are not supported yet.</p>}
         <ErrorText>{error}</ErrorText>
         <div className="flex justify-end gap-2 pt-2">
           <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-slate-400 hover:text-slate-100">

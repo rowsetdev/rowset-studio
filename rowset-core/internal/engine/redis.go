@@ -13,22 +13,25 @@ import (
 	"unicode/utf8"
 
 	goredis "github.com/redis/go-redis/v9"
+	"golang.org/x/crypto/ssh"
 )
 
-func redisClient(connection Connection) (*goredis.Client, error) {
+// redisClient opens a client and returns the cleanup that closes it and its
+// SSH tunnel, if any. Every caller must defer the cleanup.
+func redisClient(ctx context.Context, connection Connection) (*goredis.Client, func(), error) {
 	db := 0
 	if strings.TrimSpace(connection.Database) != "" {
 		parsed, err := strconv.Atoi(strings.TrimSpace(connection.Database))
 		if err != nil || parsed < 0 || parsed > 15 {
-			return nil, errors.New("database must be a Redis DB index between 0 and 15")
+			return nil, nil, errors.New("database must be a Redis DB index between 0 and 15")
 		}
 		db = parsed
 	}
 	tls, err := tlsConfig(connection.TLS, connection.Host)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return goredis.NewClient(&goredis.Options{
+	opts := &goredis.Options{
 		Addr:        net.JoinHostPort(connection.Host, fmt.Sprint(connection.Port)),
 		Username:    connection.Username,
 		Password:    connection.Password,
@@ -36,26 +39,44 @@ func redisClient(connection Connection) (*goredis.Client, error) {
 		TLSConfig:   tls,
 		DialTimeout: 10 * time.Second,
 		ReadTimeout: 24 * time.Hour,
-	}), nil
+	}
+	var tunnel *ssh.Client
+	if connection.SSH.enabled() {
+		tunnel, err = dialSSH(ctx, connection.SSH, nil)
+		if err != nil {
+			return nil, nil, err
+		}
+		opts.Dialer = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return tunnelDial(ctx, tunnel, network, addr)
+		}
+	}
+	client := goredis.NewClient(opts)
+	cleanup := func() {
+		_ = client.Close()
+		if tunnel != nil {
+			_ = tunnel.Close()
+		}
+	}
+	return client, cleanup, nil
 }
 
 func redisTest(ctx context.Context, connection Connection) error {
-	client, err := redisClient(connection)
+	client, cleanup, err := redisClient(ctx, connection)
 	if err != nil {
 		return err
 	}
-	defer client.Close()
+	defer cleanup()
 	return client.Ping(ctx).Err()
 }
 
 // redisDatabases lists the numbered DBs (0-15) that INFO keyspace reports as
 // non-empty, always including the connection's own selected DB.
 func redisDatabases(ctx context.Context, connection Connection) ([]string, error) {
-	client, err := redisClient(connection)
+	client, cleanup, err := redisClient(ctx, connection)
 	if err != nil {
 		return nil, err
 	}
-	defer client.Close()
+	defer cleanup()
 	info, err := client.Info(ctx, "keyspace").Result()
 	if err != nil {
 		return nil, err
@@ -85,11 +106,11 @@ func redisDatabases(ctx context.Context, connection Connection) ([]string, error
 // schema. Scanning is capped so a very large keyspace stays responsive.
 func redisSchema(ctx context.Context, connection Connection) (Schema, error) {
 	result := Schema{Tables: map[string][]Column{}, Indexes: map[string][]Index{}, Views: map[string]bool{}}
-	client, err := redisClient(connection)
+	client, cleanup, err := redisClient(ctx, connection)
 	if err != nil {
 		return result, err
 	}
-	defer client.Close()
+	defer cleanup()
 	dbName := strconv.Itoa(int(client.Options().DB))
 	types := map[string]int{}
 	var cursor uint64
@@ -152,11 +173,11 @@ func (m *Manager) RedisScan(ctx context.Context, connection Connection, input Re
 	if strings.TrimSpace(pattern) == "" {
 		pattern = "*"
 	}
-	client, err := redisClient(connection)
+	client, cleanup, err := redisClient(ctx, connection)
 	if err != nil {
 		return nil, 0, err
 	}
-	defer client.Close()
+	defer cleanup()
 	var entries []RedisEntry
 	cursor := input.Cursor
 	for len(entries) < input.Limit {
@@ -208,11 +229,11 @@ func (m *Manager) RedisWrite(ctx context.Context, connection Connection, input R
 	if input.TTLSeconds < 0 {
 		return errors.New("ttlSeconds must be zero or positive")
 	}
-	client, err := redisClient(connection)
+	client, cleanup, err := redisClient(ctx, connection)
 	if err != nil {
 		return err
 	}
-	defer client.Close()
+	defer cleanup()
 	switch input.Type {
 	case "string":
 		ttl := time.Duration(input.TTLSeconds) * time.Second
@@ -243,11 +264,11 @@ func (m *Manager) RedisDelete(ctx context.Context, connection Connection, input 
 	if strings.TrimSpace(input.Key) == "" {
 		return 0, errors.New("key is required")
 	}
-	client, err := redisClient(connection)
+	client, cleanup, err := redisClient(ctx, connection)
 	if err != nil {
 		return 0, err
 	}
-	defer client.Close()
+	defer cleanup()
 	return client.Del(ctx, input.Key).Result()
 }
 
@@ -265,11 +286,11 @@ type RedisSnapshot struct {
 // RedisSnapshotKey captures a key's current state before a write or delete
 // changes or removes it.
 func (m *Manager) RedisSnapshotKey(ctx context.Context, connection Connection, key string) (RedisSnapshot, error) {
-	client, err := redisClient(connection)
+	client, cleanup, err := redisClient(ctx, connection)
 	if err != nil {
 		return RedisSnapshot{}, err
 	}
-	defer client.Close()
+	defer cleanup()
 	dump, err := client.Dump(ctx, key).Result()
 	if err != nil {
 		if err == goredis.Nil {
@@ -292,11 +313,11 @@ func (m *Manager) RedisSnapshotKey(ctx context.Context, connection Connection, k
 // it: deleted if it did not exist yet, or restored with RESTORE (its exact
 // bytes and TTL) otherwise.
 func (m *Manager) RedisRestoreSnapshot(ctx context.Context, connection Connection, key string, snapshot RedisSnapshot) error {
-	client, err := redisClient(connection)
+	client, cleanup, err := redisClient(ctx, connection)
 	if err != nil {
 		return err
 	}
-	defer client.Close()
+	defer cleanup()
 	if !snapshot.Existed {
 		return client.Del(ctx, key).Err()
 	}

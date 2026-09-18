@@ -5,6 +5,20 @@ and `scripts/package-macos.sh` stamp it into Studio (sidebar), the `rowset`
 executable and the macOS app. Every change set bumps the patch version and adds
 an entry here.
 
+## 0.0.98 — 2026-09-18
+
+- Added: SSH tunnel support for MongoDB, Redis/Valkey and Elasticsearch,
+  matching what the SQL engines and Cassandra already had. All three route
+  every connection they open (Mongo's replica-set discovery included, ES's
+  HTTP transport, Redis's single connection) through one SSH tunnel via a
+  `DialContext`/`Dialer` adapter — the same pattern Cassandra already used.
+  Removed the explicit "not supported yet" rejections and connection-form
+  gates. Verified live: an in-process SSH test server forwarding real
+  connections to Mongo/Redis/Elasticsearch containers, covering
+  untrusted-host-key rejection, host-key learning, wrong-host-key
+  rejection, and a working query through the tunnel — the same regression
+  test the SQL engines already had, now table-driven to cover both.
+
 ## 0.0.97 — 2026-09-18
 
 - Removed: `reports/database-client-audit-2026-09-17.md` and its

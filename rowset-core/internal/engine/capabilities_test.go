@@ -33,6 +33,11 @@ func TestEngineCapabilitiesDoNotAdvertiseUnsupportedControls(t *testing.T) {
 	if capability := EngineCapabilities("mssql"); !capability.Explain || !capability.ExplainAnalyze {
 		t.Fatalf("SQL Server plan capabilities are inconsistent: %+v", capability)
 	}
+	for _, name := range []string{"mongodb", "elasticsearch", "redis", "valkey"} {
+		if capability := EngineCapabilities(name); !capability.SSH {
+			t.Fatalf("%s should advertise SSH tunnel support: %+v", name, capability)
+		}
+	}
 }
 
 func TestScheduledSQLUsesOnlyPooledEngines(t *testing.T) {

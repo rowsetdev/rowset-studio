@@ -14,15 +14,23 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
+	"golang.org/x/crypto/ssh"
 )
 
-func mongoClient(connection Connection) (*mongo.Client, error) {
-	if connection.SSH.enabled() {
-		return nil, errors.New("MongoDB SSH tunnelling is not supported yet")
-	}
+// mongoSSHDialer forwards every address the driver dials (the seed host and
+// any replica set member discovered afterward) through one SSH tunnel.
+type mongoSSHDialer struct{ client *ssh.Client }
+
+func (d mongoSSHDialer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	return tunnelDial(ctx, d.client, network, addr)
+}
+
+// mongoClient opens a client and returns the cleanup that closes it and its
+// SSH tunnel, if any. Every caller must defer the cleanup.
+func mongoClient(ctx context.Context, connection Connection) (*mongo.Client, func(), error) {
 	tls, err := tlsConfig(connection.TLS, connection.Host)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	opts := options.Client().SetHosts([]string{net.JoinHostPort(connection.Host, fmt.Sprint(connection.Port))}).SetConnectTimeout(10 * time.Second).SetServerSelectionTimeout(10 * time.Second)
 	if tls != nil {
@@ -31,7 +39,28 @@ func mongoClient(connection Connection) (*mongo.Client, error) {
 	if connection.Username != "" {
 		opts.SetAuth(options.Credential{AuthSource: "admin", Username: connection.Username, Password: connection.Password})
 	}
-	return mongo.Connect(opts)
+	var tunnel *ssh.Client
+	if connection.SSH.enabled() {
+		tunnel, err = dialSSH(ctx, connection.SSH, nil)
+		if err != nil {
+			return nil, nil, err
+		}
+		opts.SetDialer(mongoSSHDialer{client: tunnel})
+	}
+	client, err := mongo.Connect(opts)
+	if err != nil {
+		if tunnel != nil {
+			_ = tunnel.Close()
+		}
+		return nil, nil, err
+	}
+	cleanup := func() {
+		closeMongo(client)
+		if tunnel != nil {
+			_ = tunnel.Close()
+		}
+	}
+	return client, cleanup, nil
 }
 func closeMongo(client *mongo.Client) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -39,28 +68,28 @@ func closeMongo(client *mongo.Client) {
 	_ = client.Disconnect(ctx)
 }
 func mongoTest(ctx context.Context, connection Connection) error {
-	client, err := mongoClient(connection)
+	client, cleanup, err := mongoClient(ctx, connection)
 	if err != nil {
 		return err
 	}
-	defer closeMongo(client)
+	defer cleanup()
 	return client.Ping(ctx, readpref.Primary())
 }
 func mongoDatabases(ctx context.Context, connection Connection) ([]string, error) {
-	client, err := mongoClient(connection)
+	client, cleanup, err := mongoClient(ctx, connection)
 	if err != nil {
 		return nil, err
 	}
-	defer closeMongo(client)
+	defer cleanup()
 	return client.ListDatabaseNames(ctx, bson.D{})
 }
 func mongoSchema(ctx context.Context, connection Connection) (Schema, error) {
 	result := Schema{Tables: map[string][]Column{}, Indexes: map[string][]Index{}, Views: map[string]bool{}}
-	client, err := mongoClient(connection)
+	client, cleanup, err := mongoClient(ctx, connection)
 	if err != nil {
 		return result, err
 	}
-	defer closeMongo(client)
+	defer cleanup()
 	names, err := client.Database(connection.Database).ListCollectionNames(ctx, bson.D{})
 	if err != nil {
 		return result, err
@@ -123,11 +152,11 @@ type MongoInsertInput struct {
 
 // MongoInsertOne inserts one document, returning its _id as Extended JSON.
 func (m *Manager) MongoInsertOne(ctx context.Context, connection Connection, input MongoInsertInput) (string, error) {
-	client, err := mongoClient(connection)
+	client, cleanup, err := mongoClient(ctx, connection)
 	if err != nil {
 		return "", err
 	}
-	defer closeMongo(client)
+	defer cleanup()
 	return mongoInsertOneWith(ctx, client, connection.Database, input)
 }
 
@@ -176,11 +205,11 @@ type MongoUpdateInput struct {
 // the first document matching filter. A full-document replacement is
 // rejected: every operator update stays reviewable field by field.
 func (m *Manager) MongoUpdateOne(ctx context.Context, connection Connection, input MongoUpdateInput) (int64, int64, error) {
-	client, err := mongoClient(connection)
+	client, cleanup, err := mongoClient(ctx, connection)
 	if err != nil {
 		return 0, 0, err
 	}
-	defer closeMongo(client)
+	defer cleanup()
 	return mongoUpdateOneWith(ctx, client, connection.Database, input)
 }
 
@@ -226,11 +255,11 @@ type MongoReplaceInput struct {
 }
 
 func (m *Manager) MongoReplaceOne(ctx context.Context, connection Connection, input MongoReplaceInput) error {
-	client, err := mongoClient(connection)
+	client, cleanup, err := mongoClient(ctx, connection)
 	if err != nil {
 		return err
 	}
-	defer closeMongo(client)
+	defer cleanup()
 	return mongoReplaceOneWith(ctx, client, connection.Database, input)
 }
 
@@ -261,11 +290,11 @@ type MongoDeleteInput struct {
 
 // MongoDeleteOne removes the first document matching filter.
 func (m *Manager) MongoDeleteOne(ctx context.Context, connection Connection, input MongoDeleteInput) (int64, error) {
-	client, err := mongoClient(connection)
+	client, cleanup, err := mongoClient(ctx, connection)
 	if err != nil {
 		return 0, err
 	}
-	defer closeMongo(client)
+	defer cleanup()
 	return mongoDeleteOneWith(ctx, client, connection.Database, input)
 }
 
@@ -309,6 +338,7 @@ func mongoHasPredicate(filter bson.D) bool {
 // translate, since it already explains the fix.
 type MongoTransaction struct {
 	client   *mongo.Client
+	cleanup  func()
 	session  *mongo.Session
 	sessCtx  context.Context
 	cancel   context.CancelFunc
@@ -320,23 +350,24 @@ type MongoTransaction struct {
 
 // MongoBegin starts a session and a transaction on it.
 func (m *Manager) MongoBegin(ctx context.Context, connection Connection) (*MongoTransaction, error) {
-	client, err := mongoClient(connection)
+	client, cleanup, err := mongoClient(ctx, connection)
 	if err != nil {
 		return nil, err
 	}
 	session, err := client.StartSession()
 	if err != nil {
-		closeMongo(client)
+		cleanup()
 		return nil, err
 	}
 	if err := session.StartTransaction(); err != nil {
 		session.EndSession(context.Background())
-		closeMongo(client)
+		cleanup()
 		return nil, err
 	}
 	lifetime, cancel := context.WithCancel(context.Background())
 	return &MongoTransaction{
 		client:   client,
+		cleanup:  cleanup,
 		session:  session,
 		sessCtx:  mongo.NewSessionContext(lifetime, session),
 		cancel:   cancel,
@@ -377,7 +408,7 @@ func (t *MongoTransaction) close() {
 		t.finished = true
 		t.session.EndSession(context.Background())
 		t.cancel()
-		closeMongo(t.client)
+		t.cleanup()
 	})
 }
 
@@ -457,11 +488,11 @@ func (m *Manager) MongoAggregate(ctx context.Context, connection Connection, inp
 	if input.Limit < 1 || input.Limit > 10000 {
 		return nil, false, errors.New("limit must be between 1 and 10000")
 	}
-	client, err := mongoClient(connection)
+	client, cleanup, err := mongoClient(ctx, connection)
 	if err != nil {
 		return nil, false, err
 	}
-	defer closeMongo(client)
+	defer cleanup()
 	opts := options.Aggregate()
 	if input.MaxTimeMs > 0 {
 		var timeoutCancel context.CancelFunc
@@ -488,11 +519,11 @@ func (m *Manager) MongoAggregate(ctx context.Context, connection Connection, inp
 }
 
 func (m *Manager) MongoFind(ctx context.Context, connection Connection, input MongoFindInput) ([]json.RawMessage, bool, error) {
-	client, err := mongoClient(connection)
+	client, cleanup, err := mongoClient(ctx, connection)
 	if err != nil {
 		return nil, false, err
 	}
-	defer closeMongo(client)
+	defer cleanup()
 	return mongoFindWith(ctx, client, connection.Database, input)
 }
 

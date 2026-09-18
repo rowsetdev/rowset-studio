@@ -42,11 +42,11 @@ encrypted in a local SQLite database.
 | SQLite | Absolute path to an existing file | SQL, transactions, schema, keys, indexes, DDL, CSV import/export, JSON export |
 | DuckDB | Absolute path to an existing file; CGO build | SQL, transactions, tables/views, DDL, CSV import/export, JSON export |
 | <img src="rowset-studio/src/assets/engines/clickhouse.svg" height="18" valign="middle"> ClickHouse | Native TCP: 9440 with TLS, 9000 without | SQL, databases, tables/views, DDL, CSV/JSON export, estimated plans |
-| <img src="rowset-studio/src/assets/engines/mongodb.svg" height="18" valign="middle"> MongoDB | Host/port; `authSource=admin` | Compass-style filter/project/sort/skip/limit query bar synced with `db.collection.find()`, `db.collection.aggregate([...])` read-only pipelines, document insert/update/delete with row backups, manual-commit transactions (replica set or mongos required) |
-| <img src="rowset-studio/src/assets/engines/redis.svg" height="18" valign="middle"> Redis | Host/port | Pattern/type scan bar, keys grouped by type as pseudo-tables, string/hash key writes and delete with row backups |
-| Valkey | Host/port | Redis-compatible pattern/type scan bar, key previews, string/hash key writes and delete with row backups |
+| <img src="rowset-studio/src/assets/engines/mongodb.svg" height="18" valign="middle"> MongoDB | Host/port, SSH tunnel; `authSource=admin` | Compass-style filter/project/sort/skip/limit query bar synced with `db.collection.find()`, `db.collection.aggregate([...])` read-only pipelines, document insert/update/delete with row backups, manual-commit transactions (replica set or mongos required) |
+| <img src="rowset-studio/src/assets/engines/redis.svg" height="18" valign="middle"> Redis | Host/port, SSH tunnel | Pattern/type scan bar, keys grouped by type as pseudo-tables, string/hash key writes and delete with row backups |
+| Valkey | Host/port, SSH tunnel | Redis-compatible pattern/type scan bar, key previews, string/hash key writes and delete with row backups |
 | <img src="rowset-studio/src/assets/engines/cassandra.svg" height="18" valign="middle"> Cassandra | Contact points, keyspace, TLS/SSH, consistency/paging | Governed CQL reads/writes/DDL/batches with row backups, schema/DDL, CSV import, CSV/JSON export, CQL `INSERT JSON` export for base tables without counters |
-| <img src="rowset-studio/src/assets/engines/elasticsearch.svg" height="18" valign="middle"> Elasticsearch | HTTP API host/port | Index/query/size search bar with `sort`/`search_after` pagination and `aggs`, index mapping browsing, document index/update/delete with row backups |
+| <img src="rowset-studio/src/assets/engines/elasticsearch.svg" height="18" valign="middle"> Elasticsearch | HTTP API host/port, SSH tunnel | Index/query/size search bar with `sort`/`search_after` pagination and `aggs`, index mapping browsing, document index/update/delete with row backups |
 
 MongoDB, Redis, Valkey and Elasticsearch writes are limited to single-document/key
 operations (no bulk APIs yet); MongoDB additionally has read-only
@@ -131,8 +131,8 @@ backups above): MongoDB backs up the document, Elasticsearch re-indexes it
 on restore; Redis/Valkey capture the key with `DUMP`/`PTTL` and restore it
 with `RESTORE`, byte-for-byte with its original TTL, or remove it if it
 didn't exist before the write (Redis has no distinct update mode, so a
-`Write` "Set" is backed up the same as a delete). Bulk APIs and SSH
-tunnels are not yet supported for any of the four, and
+`Write` "Set" is backed up the same as a delete). SSH tunnels are
+supported for all four; bulk write APIs are not yet, and
 index/primary-key/foreign-key metadata is not loaded for any
 non-`database/sql` engine (SQLite, DuckDB, ClickHouse and these four).
 Inline grid editing remains available only for the SQL engines, since it's

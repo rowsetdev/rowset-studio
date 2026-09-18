@@ -791,9 +791,6 @@ func normalizeConnectionInput(input connectionInput, existing *domain.Connection
 	if input.Engine == "duckdb" && !engine.DuckDBAvailable {
 		return domain.Connection{}, nil, "this build does not include DuckDB"
 	}
-	if input.Engine == "mongodb" && input.SSHHost != nil && *input.SSHHost != "" {
-		return domain.Connection{}, nil, "MongoDB SSH tunnelling is not supported yet"
-	}
 	if engine.FileEngine(input.Engine) {
 		if input.Database == nil {
 			return domain.Connection{}, nil, "database file path is required"

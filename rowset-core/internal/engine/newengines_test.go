@@ -111,11 +111,11 @@ func TestLiveRedis(t *testing.T) {
 	if err := redisTest(ctx, c); err != nil {
 		t.Fatal(err)
 	}
-	client, err := redisClient(c)
+	client, cleanup, err := redisClient(ctx, c)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer client.Close()
+	defer cleanup()
 	for _, key := range []string{"rowset:probe:string", "rowset:probe:hash", "rowset:probe:list", "rowset:probe:set", "rowset:probe:zset"} {
 		if err := client.Del(ctx, key).Err(); err != nil {
 			t.Fatal(err)
@@ -311,10 +311,11 @@ func TestLiveElasticsearch(t *testing.T) {
 	if err := elasticsearchTest(ctx, c); err != nil {
 		t.Fatal(err)
 	}
-	client, err := elasticsearchClient(c)
+	client, cleanup, err := elasticsearchClient(ctx, c)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer cleanup()
 	body := `{"label":"hello"}`
 	res, err := client.Index("rowset-probe", strings.NewReader(body), client.Index.WithContext(ctx), client.Index.WithRefresh("true"))
 	if err != nil {

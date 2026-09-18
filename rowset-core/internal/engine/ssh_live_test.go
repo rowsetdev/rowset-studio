@@ -115,7 +115,7 @@ func serveSSHConn(conn net.Conn, config *ssh.ServerConfig, forwarded func()) {
 // and checks host-key verification: the right key connects, a wrong one is
 // refused, and none accepts a connection with no key trusted.
 func TestLiveDatabaseThroughSSHTunnel(t *testing.T) {
-	engines := []struct {
+	sqlEngines := []struct {
 		engine, passwordEnv, user string
 		port                      int
 	}{
@@ -124,48 +124,95 @@ func TestLiveDatabaseThroughSSHTunnel(t *testing.T) {
 		{"mariadb", "ROWSET_MATRIX_MARIADB_PASSWORD", "root", 53307},
 		{"mssql", "ROWSET_MATRIX_MSSQL_PASSWORD", "sa", 51433},
 	}
-	for _, e := range engines {
+	for _, e := range sqlEngines {
+		e := e
 		t.Run(e.engine, func(t *testing.T) {
 			password := os.Getenv(e.passwordEnv)
 			if password == "" {
 				t.Skip(e.passwordEnv + " is not configured")
 			}
-			sshAddr, hostKey, forwarded := startTestSSHServer(t, "tunnel", "tunnelpass")
-			host, portText, _ := net.SplitHostPort(sshAddr)
-			sshPort, _ := strconv.Atoi(portText)
-			base := SSHConfig{Host: host, Port: sshPort, User: "tunnel", AuthMethod: "password", Password: "tunnelpass"}
-
-			manager := NewManager()
-			defer manager.Close()
-			connect := func(known string) error {
-				ssh := base
-				ssh.KnownHost = known
-				conn := Connection{ID: "ssh-" + e.engine + "-" + known[:min(len(known), 8)], Engine: e.engine, Host: "127.0.0.1", Port: e.port, Database: "rowset_e2e", Username: e.user, Password: password, PoolSize: 1, SSH: ssh}
-				_, err := manager.Execute(context.Background(), conn, "SELECT 1", 0)
-				return err
-			}
-
-			// With no host key trusted, a connection is refused before dialing.
-			if err := connect(""); err == nil || !strings.Contains(err.Error(), "host key has not been accepted") {
-				t.Fatalf("connection without a trusted host key was allowed: %v", err)
-			}
-			// The tunnel-only test learns the key; it must match the server's.
-			learned, err := manager.TestTunnel(context.Background(), Connection{Engine: e.engine, SSH: base})
-			if err != nil || learned != hostKey {
-				t.Fatalf("TestTunnel key=%q want %q err=%v", learned, hostKey, err)
-			}
-			// A wrong host key is refused.
-			wrong := hostKey[:len(hostKey)-6] + "AAAAAA"
-			if err := connect(wrong); err == nil {
-				t.Fatal("a wrong host key was accepted")
-			}
-			// The learned key connects and the query runs through the tunnel.
-			if err := connect(hostKey); err != nil {
-				t.Fatalf("query through the tunnel failed: %v", err)
-			}
-			if *forwarded == 0 {
-				t.Fatal("no connection was forwarded through the SSH server")
-			}
+			testSSHTunnel(t, e.engine, func(host string, port int) Connection {
+				return Connection{Engine: e.engine, Host: "127.0.0.1", Port: e.port, Database: "rowset_e2e", Username: e.user, Password: password, PoolSize: 1}
+			})
 		})
+	}
+
+	// MongoDB, Redis/Valkey and Elasticsearch have no query path through
+	// Manager.Execute; Manager.Test (a Ping/equivalent) is what every one of
+	// them, SQL included, is actually verified through here.
+	docEngines := []struct {
+		engine, hostEnv, portEnv string
+		defaultPort              int
+		database                 string
+	}{
+		{"mongodb", "ROWSET_TEST_MONGODB_HOST", "ROWSET_MATRIX_MONGODB_PORT", 27017, ""},
+		{"redis", "ROWSET_TEST_REDIS_HOST", "ROWSET_TEST_REDIS_PORT", 6379, "0"},
+		{"elasticsearch", "ROWSET_TEST_ELASTICSEARCH_HOST", "ROWSET_TEST_ELASTICSEARCH_PORT", 9200, "elasticsearch"},
+	}
+	for _, e := range docEngines {
+		e := e
+		t.Run(e.engine, func(t *testing.T) {
+			host := os.Getenv(e.hostEnv)
+			if host == "" {
+				t.Skip(e.hostEnv + " is not configured")
+			}
+			port := e.defaultPort
+			if v := os.Getenv(e.portEnv); v != "" {
+				var err error
+				if port, err = parsePort(v); err != nil {
+					t.Fatal(err)
+				}
+			}
+			testSSHTunnel(t, e.engine, func(sshHost string, sshPort int) Connection {
+				return Connection{Engine: e.engine, Host: host, Port: port, Database: e.database, TLS: TLSSettings{Mode: TLSDisable}, PoolSize: 1}
+			})
+		})
+	}
+}
+
+// testSSHTunnel starts an in-process SSH server and runs the standard
+// host-key-trust and tunnel-forwarding checks against build's connection
+// (its Host/Port/etc. reach the real target directly; SSH fields are added
+// here).
+func testSSHTunnel(t *testing.T, engineName string, build func(sshHost string, sshPort int) Connection) {
+	t.Helper()
+	sshAddr, hostKey, forwarded := startTestSSHServer(t, "tunnel", "tunnelpass")
+	host, portText, _ := net.SplitHostPort(sshAddr)
+	sshPort, _ := strconv.Atoi(portText)
+	base := SSHConfig{Host: host, Port: sshPort, User: "tunnel", AuthMethod: "password", Password: "tunnelpass"}
+
+	manager := NewManager()
+	defer manager.Close()
+	connect := func(known string) error {
+		conn := build(host, sshPort)
+		conn.ID = "ssh-" + engineName + "-" + known[:min(len(known), 8)]
+		ssh := base
+		ssh.KnownHost = known
+		conn.SSH = ssh
+		return manager.Test(context.Background(), conn)
+	}
+
+	// With no host key trusted, a connection is refused before dialing.
+	if err := connect(""); err == nil || !strings.Contains(err.Error(), "host key has not been accepted") {
+		t.Fatalf("connection without a trusted host key was allowed: %v", err)
+	}
+	// The tunnel-only test learns the key; it must match the server's.
+	learnConn := build(host, sshPort)
+	learnConn.SSH = base
+	learned, err := manager.TestTunnel(context.Background(), learnConn)
+	if err != nil || learned != hostKey {
+		t.Fatalf("TestTunnel key=%q want %q err=%v", learned, hostKey, err)
+	}
+	// A wrong host key is refused.
+	wrong := hostKey[:len(hostKey)-6] + "AAAAAA"
+	if err := connect(wrong); err == nil {
+		t.Fatal("a wrong host key was accepted")
+	}
+	// The learned key connects and the check runs through the tunnel.
+	if err := connect(hostKey); err != nil {
+		t.Fatalf("connection through the tunnel failed: %v", err)
+	}
+	if *forwarded == 0 {
+		t.Fatal("no connection was forwarded through the SSH server")
 	}
 }
