@@ -5,6 +5,31 @@ and `scripts/package-macos.sh` stamp it into Studio (sidebar), the `rowset`
 executable and the macOS app. Every change set bumps the patch version and adds
 an entry here.
 
+## 0.0.102 — 2026-09-19
+
+- Changed: Rowset can now be extended from another Go module and another
+  front-end project instead of by editing this repository.
+  - Go: the module path is `github.com/rowsetdev/rowset-studio/rowset-core`
+    (the SQL parser moved into it as `rowset-core/sqlguard`). The public
+    package `rowset-core/rowset` builds a Rowset executable with plugins
+    (`rowset.Main`): commands, server set-up, access rules
+    (`Server.SetAccess`), sign-in routes (`Kit.IssueSession`), policy kinds,
+    tables in the control database (`Setup.AddStorage`), activity backends,
+    a served Studio build (`Server.SetWebUI`) and `Server.Run` /
+    `OpenSession` for clients other than the HTTP API. Everything else stays
+    internal.
+  - Studio: the repository-root `package.json` publishes Studio as
+    `@rowsetdev/studio`; `mountStudio(root, { extensions })` renders it with
+    extensions, which can add pages, a sign-in form, notices, Account
+    sections and policy roles.
+- Changed: password sign-in, password changes, user and role administration
+  and sign-in lockout are no longer part of the core; a desktop workspace
+  never used them. Its sign-in, sessions and data are unchanged, and
+  existing databases open as before.
+- Fixed: the daily audit-chain check did not include an entry's reference in
+  the hash it re-computed, so an installation that stores references would
+  have reported intact entries as tampered.
+
 ## 0.0.101 — 2026-09-19
 
 - Fixed: the SSH tunnel of a MongoDB, Redis/Valkey or Elasticsearch

@@ -10,6 +10,7 @@ export type {
   ConnectionFieldProps,
   PolicyTemplate,
   PolicyAction,
+  PolicyRole,
 } from "./app/extensions";
 
 // Components.

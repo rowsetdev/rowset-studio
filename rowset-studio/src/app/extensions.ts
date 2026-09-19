@@ -50,6 +50,11 @@ export interface PolicyTemplate {
   statement?: boolean;
 }
 
+export interface PolicyRole {
+  id: string;
+  name: string;
+}
+
 export interface PolicyAction {
   value: string;
   label: string;
@@ -98,6 +103,8 @@ export interface StudioExtension {
   policyTemplates?: PolicyTemplate[];
   /** Additional policy action groups. */
   policyActions?: PolicyAction[];
+  /** Roles a policy can be scoped to. */
+  policyRoles?: () => Promise<PolicyRole[]>;
 }
 
 const modules = import.meta.glob<{ default: StudioExtension }>("./extensions/*.tsx", { eager: true });

@@ -7,7 +7,6 @@ import { api } from "../../lib/api";
 import { useShared } from "../../lib/instance";
 import { useActiveExtensions, type PolicyAction, type PolicyTemplate } from "../../app/extensions";
 import { listConnections } from "../connections/api";
-import { listRoles } from "./roles";
 
 interface PolicyOverride {
   scope: "connection" | "role";
@@ -84,7 +83,8 @@ export default function PoliciesPage() {
   // Group by environment (dev, then test/staging, then prod) so scope
   // pickers don't force you to infer environment from the name.
   const connections = useMemo(() => sortByEnv(rawConnections), [rawConnections]);
-  const { data: allRoles = [] } = useQuery({ queryKey: ["roles"], queryFn: listRoles, enabled: !community });
+  const policyRoles = useActiveExtensions().find((item) => item.policyRoles)?.policyRoles;
+  const { data: allRoles = [] } = useQuery({ queryKey: ["roles"], queryFn: () => policyRoles!(), enabled: Boolean(policyRoles) });
   // Admin is god-mode and bypasses policy scoping entirely -- never offer it here.
   const roles = useMemo(() => allRoles.filter((r) => r.name !== "admin"), [allRoles]);
   const KEY = ["policies", connectionId, role];
