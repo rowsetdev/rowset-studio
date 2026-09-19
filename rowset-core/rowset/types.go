@@ -149,3 +149,18 @@ func BufferedActivity(backend ActivityStore, capacity int) ActivityStore {
 func LoadConfig(defaultDBPath string) (Config, error) {
 	return config.LoadEnvironment(defaultDBPath)
 }
+
+// ChainBreak names the first audit entry of an organization whose hash no
+// longer matches.
+type ChainBreak = store.ChainBreak
+
+// PrepareAudit links an audit entry to the previous entry of its
+// organization's hash chain; an activity backend calls it before storing
+// the entry.
+func PrepareAudit(previous string, item AuditLog) AuditLog { return store.PrepareAudit(previous, item) }
+
+// VerifyPreparedAudit reports whether a stored entry still matches the hash
+// PrepareAudit gave it.
+func VerifyPreparedAudit(version int64, previous, expected string, item AuditLog) bool {
+	return store.VerifyPreparedAudit(version, previous, expected, item)
+}
