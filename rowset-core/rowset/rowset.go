@@ -76,3 +76,6 @@ func (s *Setup) ConfigureServer(configure func(*Server) error) {
 
 // Server is a running Rowset API server.
 type Server = api.Server
+
+// ServerOptions describe a server a command creates with Context.NewServer.
+type ServerOptions = app.ServerOptions

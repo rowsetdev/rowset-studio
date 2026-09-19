@@ -27,6 +27,9 @@ type (
 	AuditLog             = domain.AuditLog
 	QueryHistory         = domain.QueryHistory
 	Decision             = policy.Decision
+	Effect               = policy.Effect
+	Risk                 = policy.Risk
+	CustomPolicy         = domain.CustomPolicy
 	Config               = config.Config
 )
 
@@ -96,4 +99,53 @@ func OpenStore(ctx context.Context, path, backupDir string) (*Store, error) {
 		return store.Open(ctx, path)
 	}
 	return store.Open(ctx, path, store.WithMigrationBackup(backupDir))
+}
+
+// Policies.
+type (
+	PolicyDefinition = api.PolicyDefinition
+	PolicyRule       = policy.Rule
+	PolicyInput      = policy.Input
+	CustomPolicyKind = api.CustomPolicyKind
+)
+
+// Effects and risks of a policy decision. A plugin may use its own effect,
+// such as one that holds a statement for review; any effect other than
+// Allow and Deny is handed to the escalation workflow.
+const (
+	Allow        = policy.Allow
+	Deny         = policy.Deny
+	LowRisk      = policy.Low
+	MediumRisk   = policy.Medium
+	HighRisk     = policy.High
+	CriticalRisk = policy.Critical
+)
+
+// AddPolicy adds a toggle policy to shared installations; rule, when not
+// nil, evaluates it after the built-in guardrails (see PolicyInput.Enabled).
+func (s *Setup) AddPolicy(definition PolicyDefinition, rule PolicyRule) {
+	api.RegisterPolicy(definition)
+	if rule != nil {
+		policy.AddRule(rule)
+	}
+}
+
+// AddCustomPolicyKind adds a kind of custom policy to shared installations.
+func (s *Setup) AddCustomPolicyKind(kind CustomPolicyKind) { api.RegisterCustomPolicyKind(kind) }
+
+// BatchWriter is implemented by an activity backend that stores many records
+// in one write.
+type BatchWriter = activity.BatchWriter
+
+// BufferedActivity takes activity off the request path: records are queued
+// (up to capacity) and handed to backend in batches by one writer.
+func BufferedActivity(backend ActivityStore, capacity int) ActivityStore {
+	return activity.NewBuffered(backend, capacity)
+}
+
+// LoadConfig reads the configuration file named by ROWSET_CONFIG (or
+// rowset.env) into the environment, then the settings Rowset itself uses.
+// It does not validate them; see Config.Validate.
+func LoadConfig(defaultDBPath string) (Config, error) {
+	return config.LoadEnvironment(defaultDBPath)
 }

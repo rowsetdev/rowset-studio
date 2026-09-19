@@ -3,8 +3,9 @@
 package app
 
 import (
-	"golang.org/x/sys/windows"
 	"os"
+
+	"golang.org/x/sys/windows"
 )
 
 func lockDesktop(path string) (func(), error) {

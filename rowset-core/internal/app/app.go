@@ -5,11 +5,16 @@ package app
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"sort"
 	"strings"
 
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/activity"
 	"github.com/rowsetdev/rowset-studio/rowset-core/internal/api"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/auth"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/config"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/store"
 )
 
 // Command runs one subcommand.
@@ -36,6 +41,31 @@ func (c Context) ConfigureServer(server *api.Server) error {
 		}
 	}
 	return nil
+}
+
+// ServerOptions describe a server a command creates.
+type ServerOptions struct {
+	Config config.Config
+	Store  *store.Store
+	// Activity stores audit entries and query history; nil keeps them in
+	// the control database.
+	Activity activity.Store
+	Logger   *slog.Logger
+}
+
+// NewServer creates a server with the registered server set-up applied.
+func (c Context) NewServer(options ServerOptions) (*api.Server, error) {
+	if options.Activity == nil {
+		// Statements are recorded by one background writer in batches, so an
+		// audit write never holds up the statement it describes.
+		options.Activity = activity.NewBuffered(activity.SQLite{Data: options.Store}, 4096)
+	}
+	server := api.NewWithActivity(options.Config, options.Store, options.Activity, auth.NewIssuer(options.Config.JWTSecret, options.Config.JWTSecretPrevious), options.Logger)
+	if err := c.ConfigureServer(server); err != nil {
+		server.Close()
+		return nil, err
+	}
+	return server, nil
 }
 
 // Options describes one Rowset executable.

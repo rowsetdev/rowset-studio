@@ -340,3 +340,37 @@ func (s *Server) deleteCustomPolicy(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(204)
 }
+
+// PolicyDefinition is a toggle policy added to the built-in catalog of a
+// shared installation.
+type PolicyDefinition struct {
+	Key, Description, Risk, Detail string
+	// HasValue policies carry a value, such as a limit.
+	HasValue bool
+	// Default is whether a workspace has the policy on before anyone
+	// changes it.
+	Default bool
+}
+
+// RegisterPolicy adds a policy to the catalog of shared installations.
+// Call before any server is created.
+func RegisterPolicy(definition PolicyDefinition) {
+	policyCatalog = append(policyCatalog, policyDefinition{Key: definition.Key, Description: definition.Description, Risk: definition.Risk, Detail: definition.Detail, HasValue: definition.HasValue, Default: definition.Default, Shared: true})
+}
+
+// CustomPolicyKind is a kind of custom policy a shared installation offers.
+// Evaluate runs when a statement is not otherwise blocked; matchTable
+// reports whether the statement reads or writes the policy's table.
+type CustomPolicyKind struct {
+	Kind string
+	// StatementConfig kinds take a statement kind (insert, update, delete,
+	// ddl) as their configuration.
+	StatementConfig bool
+	Evaluate        func(item domain.CustomPolicy, statement sqlguard.Info, matchTable bool, decision policy.Decision) (policy.Decision, bool)
+}
+
+// RegisterCustomPolicyKind adds a custom policy kind to shared
+// installations. Call before any server is created.
+func RegisterCustomPolicyKind(kind CustomPolicyKind) {
+	customRules[kind.Kind] = customRule{statementConfig: kind.StatementConfig, shared: true, evaluate: kind.Evaluate}
+}

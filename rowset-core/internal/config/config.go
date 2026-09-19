@@ -72,6 +72,15 @@ func Load() (Config, error) {
 	return cfg, nil
 }
 
+// LoadEnvironment loads the configuration file into the environment and reads
+// it without validating the result.
+func LoadEnvironment(defaultDBPath string) (Config, error) {
+	if err := loadEnvFile(); err != nil {
+		return Config{}, err
+	}
+	return FromEnvironment(defaultDBPath)
+}
+
 // FromEnvironment reads the process environment without validating it.
 func FromEnvironment(defaultDBPath string) (Config, error) {
 	env := Environment(get("ROWSET_ENV", string(Development)))

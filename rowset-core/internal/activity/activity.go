@@ -38,18 +38,8 @@ func (s SQLite) VerifyAuditChain(ctx context.Context) ([]store.ChainBreak, int, 
 	return s.Data.VerifyAuditChain(ctx)
 }
 
-// writeBatch lets the buffered writer store a whole batch in one transaction.
-func (s SQLite) writeBatch(ctx context.Context, records []queuedRecord) error {
-	var audits []domain.AuditLog
-	var histories []domain.QueryHistory
-	for _, record := range records {
-		if record.audit != nil {
-			audits = append(audits, *record.audit)
-		}
-		if record.history != nil {
-			histories = append(histories, *record.history)
-		}
-	}
+// WriteBatch stores a whole batch in one transaction.
+func (s SQLite) WriteBatch(ctx context.Context, audits []domain.AuditLog, histories []domain.QueryHistory) error {
 	return s.Data.WriteActivity(ctx, audits, histories)
 }
 
@@ -83,8 +73,10 @@ type Buffered struct {
 	closed  bool
 }
 
-type batchStore interface {
-	writeBatch(context.Context, []queuedRecord) error
+// BatchWriter is implemented by a backend that can store many records in
+// one write; Buffered then hands it each batch, audit entries in order.
+type BatchWriter interface {
+	WriteBatch(ctx context.Context, audits []domain.AuditLog, histories []domain.QueryHistory) error
 }
 
 const maxBatch = 256
@@ -163,8 +155,18 @@ func (b *Buffered) store(records []queuedRecord) {
 }
 
 func (b *Buffered) write(ctx context.Context, records []queuedRecord) error {
-	if batch, ok := b.backend.(batchStore); ok {
-		return batch.writeBatch(ctx, records)
+	if batch, ok := b.backend.(BatchWriter); ok {
+		var audits []domain.AuditLog
+		var histories []domain.QueryHistory
+		for _, record := range records {
+			if record.audit != nil {
+				audits = append(audits, *record.audit)
+			}
+			if record.history != nil {
+				histories = append(histories, *record.history)
+			}
+		}
+		return batch.WriteBatch(ctx, audits, histories)
 	}
 	for _, record := range records {
 		var err error

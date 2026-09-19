@@ -16,8 +16,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/rowsetdev/rowset-studio/rowset-core/internal/api"
-	"github.com/rowsetdev/rowset-studio/rowset-core/internal/auth"
 	"github.com/rowsetdev/rowset-studio/rowset-core/internal/config"
 	"github.com/rowsetdev/rowset-studio/rowset-core/internal/store"
 )
@@ -163,11 +161,11 @@ func desktop(command Context) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	cfg.LocalShutdown = stop
-	app := api.New(cfg, data, auth.NewIssuer(cfg.JWTSecret, cfg.JWTSecretPrevious), buildLogger(filepath.Join(directory, "logs")))
-	defer app.Close()
-	if err := command.ConfigureServer(app); err != nil {
+	app, err := command.NewServer(ServerOptions{Config: cfg, Store: data, Logger: buildLogger(filepath.Join(directory, "logs"))})
+	if err != nil {
 		return err
 	}
+	defer app.Close()
 	server := &http.Server{Handler: app.Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 120 * time.Second}
 	state := desktopState{Port: port, Key: cfg.LocalLauncherKey}
 	raw, err := json.Marshal(state)
