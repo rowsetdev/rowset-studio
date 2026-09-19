@@ -16,7 +16,7 @@ import (
 	"github.com/rowsetdev/rowset-studio/rowset-core/internal/store"
 )
 
-func newAuthTestServer(t *testing.T) http.Handler {
+func newAuthTestServer(t *testing.T) (*Server, http.Handler) {
 	t.Helper()
 	data, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "rowset.sqlite3"))
 	if err != nil {
@@ -34,15 +34,18 @@ func newAuthTestServer(t *testing.T) http.Handler {
 		t.Fatal(err)
 	}
 	cfg := config.Config{RequestBodyLimitBytes: 1 << 20, SecureCookies: false}
-	return New(cfg, data, auth.NewIssuer("test-secret-that-is-at-least-thirty-two-bytes", ""), slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))).Handler()
+	server := New(cfg, data, auth.NewIssuer("test-secret-that-is-at-least-thirty-two-bytes", ""), slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)))
+	return server, server.Handler()
 }
 
 func TestRefreshCookieRestoresReloadedSessionAndRotates(t *testing.T) {
-	handler := newAuthTestServer(t)
-	login := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewBufferString(`{"email":"admin@example.com","password":"secure-password"}`))
-	login.Header.Set("Content-Type", "application/json")
+	server, handler := newAuthTestServer(t)
+	user, err := server.store.User(context.Background(), "user-1")
+	if err != nil {
+		t.Fatal(err)
+	}
 	loginResponse := httptest.NewRecorder()
-	handler.ServeHTTP(loginResponse, login)
+	server.issueSession(loginResponse, httptest.NewRequest(http.MethodPost, "/api/auth/local", nil), domain.Identity{UserID: user.ID, OrgID: user.OrgID, Email: user.Email, Role: "admin"}, user.PasswordHash, nil)
 	if loginResponse.Code != http.StatusOK {
 		t.Fatalf("login: %d %s", loginResponse.Code, loginResponse.Body.String())
 	}
@@ -91,26 +94,11 @@ func TestRefreshCookieRestoresReloadedSessionAndRotates(t *testing.T) {
 }
 
 func TestRefreshWithoutSessionIsQuietNoContent(t *testing.T) {
-	handler := newAuthTestServer(t)
+	_, handler := newAuthTestServer(t)
 	request := httptest.NewRequest(http.MethodPost, "/api/auth/refresh", nil)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusNoContent || response.Body.Len() != 0 {
 		t.Fatalf("refresh without session: status=%d body=%q", response.Code, response.Body.String())
-	}
-}
-
-func TestInvalidLoginDoesNotRevealUnknownEmail(t *testing.T) {
-	handler := newAuthTestServer(t)
-	for _, body := range []string{
-		`{"email":"unknown@example.com","password":"wrong"}`,
-		`{"email":"admin@example.com","password":"wrong"}`,
-	} {
-		request := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewBufferString(body))
-		response := httptest.NewRecorder()
-		handler.ServeHTTP(response, request)
-		if response.Code != http.StatusUnauthorized || response.Body.String() != "{\"error\":{\"code\":\"BAD_CREDENTIALS\",\"message\":\"invalid email or password\"}}\n" {
-			t.Fatalf("unexpected login error: %d %s", response.Code, response.Body.String())
-		}
 	}
 }

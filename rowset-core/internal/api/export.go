@@ -53,7 +53,7 @@ func (s *Server) exportTable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	identity := identityFromContext(r.Context())
-	role, err := s.store.UserRole(r.Context(), identity.UserID)
+	role, err := s.role(r.Context(), identity.UserID)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "role missing")
 		return
@@ -122,7 +122,7 @@ func (s *Server) exportTable(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.Copy(w, file)
 }
 
-func (s *Server) exportCassandra(w http.ResponseWriter, r *http.Request, connection domain.Connection, role domain.Role, input exportInput) {
+func (s *Server) exportCassandra(w http.ResponseWriter, r *http.Request, connection domain.Connection, role AccessRole, input exportInput) {
 	keyspace := input.Schema
 	if keyspace == "" {
 		keyspace = input.Database
@@ -158,7 +158,7 @@ func (s *Server) exportCassandra(w http.ResponseWriter, r *http.Request, connect
 		writeError(w, 500, "INTERNAL", "policies unavailable")
 		return
 	}
-	decision := policy.Evaluate(policy.Input{Statement: info, Role: role.Name, ReadOnly: role.IsReadOnly || connection.ReadOnly, Environment: connection.Environment, Disabled: disabled, Enabled: enabled})
+	decision := policy.Evaluate(policy.Input{Statement: info, Role: role.Name, ReadOnly: role.ReadOnly || connection.ReadOnly, Environment: connection.Environment, Disabled: disabled, Enabled: enabled})
 	if decision.Effect != policy.Allow {
 		writePolicyError(w, 403, "POLICY_DENIED", decision, nil)
 		return

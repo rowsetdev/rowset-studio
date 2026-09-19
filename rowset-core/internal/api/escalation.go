@@ -58,7 +58,7 @@ func (s *Server) ExecuteDeferred(r *http.Request, statement DeferredStatement) D
 	if err != nil {
 		return deferredError("requesting user no longer exists")
 	}
-	role, err := s.store.UserRole(r.Context(), user.ID)
+	role, err := s.role(r.Context(), user.ID)
 	if err != nil {
 		return deferredError("requesting user has no role")
 	}
@@ -66,22 +66,15 @@ func (s *Server) ExecuteDeferred(r *http.Request, statement DeferredStatement) D
 	if err != nil {
 		return deferredError("connection no longer exists")
 	}
-	access := role.Name == "admin"
-	if !access {
-		items, _ := s.store.ListRoleConnectionAccess(r.Context(), role.ID)
-		for _, item := range items {
-			access = access || item.ConnectionID == connection.ID
-		}
-	}
-	if !access {
+	caller := domain.Identity{UserID: user.ID, OrgID: user.OrgID, Email: user.Email, Role: role.Name}
+	if !s.canUseConnection(r.Context(), caller, connection) {
 		return deferredError("requesting user no longer has connection access")
 	}
-	caller := domain.Identity{UserID: user.ID, OrgID: user.OrgID, Email: user.Email, Role: role.Name}
 	disabled, enabled, rowLimit, policyTimeout, err := s.resolvePolicies(r, caller, connection)
 	if err != nil {
 		return deferredError("governance rules unavailable")
 	}
-	decision := policy.Evaluate(policy.Input{Statement: info, Role: role.Name, ReadOnly: role.IsReadOnly || connection.ReadOnly, Environment: connection.Environment, Cleared: true, Disabled: disabled, Enabled: enabled})
+	decision := policy.Evaluate(policy.Input{Statement: info, Role: role.Name, ReadOnly: role.ReadOnly || connection.ReadOnly, Environment: connection.Environment, Cleared: true, Disabled: disabled, Enabled: enabled})
 	if !caller.IsAdmin() {
 		decision, rowLimit, err = s.applyCustomPolicies(r, caller, connection, info, true, decision, rowLimit)
 		if err != nil {

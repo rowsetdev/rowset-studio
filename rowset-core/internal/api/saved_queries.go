@@ -41,19 +41,9 @@ func (s *Server) createSavedQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Reuse the same RBAC check without depending on route path values.
-	if !identity.IsAdmin() {
-		role, e := s.store.UserRole(r.Context(), identity.UserID)
-		allowed := false
-		if e == nil {
-			access, _ := s.store.ListRoleConnectionAccess(r.Context(), role.ID)
-			for _, item := range access {
-				allowed = allowed || item.ConnectionID == connection.ID
-			}
-		}
-		if !allowed {
-			writeError(w, http.StatusForbidden, "POLICY_DENIED", "role has no access to this connection")
-			return
-		}
+	if !s.canUseConnection(r.Context(), identity, connection) {
+		writeError(w, http.StatusForbidden, "POLICY_DENIED", "role has no access to this connection")
+		return
 	}
 	item := domain.SavedQuery{ID: id.New(), OrgID: identity.OrgID, UserID: identity.UserID, ConnectionID: connection.ID, Name: input.Name, SQL: input.SQL, CreatedAt: store.NowString()}
 	if err := s.store.CreateSavedQuery(r.Context(), item); err != nil {

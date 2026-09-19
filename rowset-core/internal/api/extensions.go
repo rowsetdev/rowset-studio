@@ -40,6 +40,14 @@ func (k Kit) Logger() *slog.Logger { return k.server.logger }
 // connection definitions take effect on the next query.
 func (k Kit) ResetConnections() { _ = k.server.engines.Close() }
 
+// IssueSession signs a user in: it answers the request with an access token
+// and sets the refresh cookie. passwordHash is the user's stored hash (or
+// any stable value for users without a password); changing it ends the
+// user's sessions.
+func (k Kit) IssueSession(w http.ResponseWriter, r *http.Request, identity domain.Identity, passwordHash string) {
+	k.server.issueSession(w, r, identity, passwordHash, nil)
+}
+
 func (k Kit) Authenticated(handler http.HandlerFunc) http.Handler {
 	return k.server.authenticated(handler)
 }

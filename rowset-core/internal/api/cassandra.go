@@ -49,7 +49,7 @@ func (s *Server) cassandraQuery(w http.ResponseWriter, r *http.Request) {
 		database = connection.Database
 	}
 	input.Keyspace = database
-	role, err := s.store.UserRole(r.Context(), identity.UserID)
+	role, err := s.role(r.Context(), identity.UserID)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "role missing")
 		return
@@ -62,7 +62,7 @@ func (s *Server) cassandraQuery(w http.ResponseWriter, r *http.Request) {
 	if rowLimit > 0 && input.Limit > rowLimit {
 		input.Limit = rowLimit
 	}
-	decision := policy.Evaluate(policy.Input{Statement: info, Role: role.Name, ReadOnly: role.IsReadOnly || connection.ReadOnly, Environment: connection.Environment, Disabled: disabled, Enabled: enabled})
+	decision := policy.Evaluate(policy.Input{Statement: info, Role: role.Name, ReadOnly: role.ReadOnly || connection.ReadOnly, Environment: connection.Environment, Disabled: disabled, Enabled: enabled})
 	if !s.config.Shared || !identity.IsAdmin() {
 		if decision, rowLimit, err = s.applyCustomPolicies(r, identity, connection, info, false, decision, rowLimit); err != nil {
 			writeError(w, 500, "INTERNAL", "governance rules unavailable")

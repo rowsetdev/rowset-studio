@@ -74,7 +74,7 @@ func (s *Server) localLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 401, "UNAUTHORIZED", "local owner unavailable")
 		return
 	}
-	role, err := s.store.UserRole(r.Context(), user.ID)
+	role, err := s.role(r.Context(), user.ID)
 	if err != nil {
 		writeError(w, 500, "INTERNAL", "local role unavailable")
 		return

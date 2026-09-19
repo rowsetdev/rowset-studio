@@ -58,7 +58,7 @@ func (s *Server) executeQuery(w http.ResponseWriter, r *http.Request, connection
 		return
 	}
 	identity := identityFromContext(r.Context())
-	role, err := s.store.UserRole(r.Context(), identity.UserID)
+	role, err := s.role(r.Context(), identity.UserID)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "role missing")
 		return
@@ -89,7 +89,7 @@ func (s *Server) executeQuery(w http.ResponseWriter, r *http.Request, connection
 		writeError(w, http.StatusInternalServerError, "INTERNAL", "governance rules unavailable")
 		return
 	}
-	decision := policy.Evaluate(policy.Input{Statement: info, Role: role.Name, ReadOnly: role.IsReadOnly || connection.ReadOnly, Environment: connection.Environment, Cleared: cleared, Disabled: disabled, Enabled: enabled})
+	decision := policy.Evaluate(policy.Input{Statement: info, Role: role.Name, ReadOnly: role.ReadOnly || connection.ReadOnly, Environment: connection.Environment, Cleared: cleared, Disabled: disabled, Enabled: enabled})
 	if !s.config.Shared || !identity.IsAdmin() {
 		decision, rowLimit, err = s.applyCustomPolicies(r, identity, connection, info, cleared, decision, rowLimit)
 		if err != nil {

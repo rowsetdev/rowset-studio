@@ -6,6 +6,7 @@ import (
 
 	"github.com/rowsetdev/rowset-studio/rowset-core/internal/activity"
 	"github.com/rowsetdev/rowset-studio/rowset-core/internal/api"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/auth"
 	"github.com/rowsetdev/rowset-studio/rowset-core/internal/config"
 	"github.com/rowsetdev/rowset-studio/rowset-core/internal/domain"
 	"github.com/rowsetdev/rowset-studio/rowset-core/internal/id"
@@ -47,6 +48,9 @@ type (
 	RouteRegistrar     = api.RouteRegistrar
 	Kit                = api.Kit
 	ConnectionSaveHook = api.ConnectionSaveHook
+	Access             = api.Access
+	AccessRole         = api.AccessRole
+	ConnectionGrant    = api.ConnectionGrant
 )
 
 // Storage.
@@ -164,3 +168,9 @@ func PrepareAudit(previous string, item AuditLog) AuditLog { return store.Prepar
 func VerifyPreparedAudit(version int64, previous, expected string, item AuditLog) bool {
 	return store.VerifyPreparedAudit(version, previous, expected, item)
 }
+
+// HashPassword hashes a password for storage (argon2id).
+func HashPassword(password string) (string, error) { return auth.HashPassword(password) }
+
+// VerifyPassword checks a password against a hash from HashPassword.
+func VerifyPassword(password, hash string) error { return auth.VerifyPassword(password, hash) }

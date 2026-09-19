@@ -126,7 +126,7 @@ func (s *Server) executeScheduled(ctx context.Context, item store.ScheduledQuery
 	if err != nil || user.Status != "active" {
 		return 0, "", errors.New("the owner of this query is no longer active")
 	}
-	role, err := s.store.UserRole(ctx, user.ID)
+	role, err := s.role(ctx, user.ID)
 	if err != nil {
 		return 0, "", errors.New("the owner has no role")
 	}
@@ -142,7 +142,7 @@ func (s *Server) executeScheduled(ctx context.Context, item store.ScheduledQuery
 	if err != nil {
 		return 0, "", err
 	}
-	if !s.canUseConnection(r, identity, role.ID, connection) {
+	if !s.canUseConnection(r.Context(), identity, connection) {
 		return 0, "", errors.New("the owner no longer has access to the connection")
 	}
 	selected, err := s.openGovernedSelect(ctx, r, identity, role, connection, item.Database, sql, "scheduler", 30*time.Minute)
@@ -176,7 +176,7 @@ func (g *governedSelect) Close() {
 
 // openGovernedSelect runs sql, which must be one SELECT, for a caller that has
 // already checked access to the connection. finish records the activity.
-func (s *Server) openGovernedSelect(ctx context.Context, r *http.Request, identity domain.Identity, role domain.Role, connection domain.Connection, database, sql, source string, timeout time.Duration) (*governedSelect, error) {
+func (s *Server) openGovernedSelect(ctx context.Context, r *http.Request, identity domain.Identity, role AccessRole, connection domain.Connection, database, sql, source string, timeout time.Duration) (*governedSelect, error) {
 	info, err := sqlguard.ParseDialect(sqlguard.DialectForEngine(connection.Engine), sql)
 	if err != nil {
 		return nil, err
@@ -189,7 +189,7 @@ func (s *Server) openGovernedSelect(ctx context.Context, r *http.Request, identi
 	if err != nil {
 		return nil, errors.New("governance rules unavailable")
 	}
-	decision := policy.Evaluate(policy.Input{Statement: info, Role: role.Name, ReadOnly: role.IsReadOnly || connection.ReadOnly, Environment: connection.Environment, Disabled: disabled, Enabled: enabled})
+	decision := policy.Evaluate(policy.Input{Statement: info, Role: role.Name, ReadOnly: role.ReadOnly || connection.ReadOnly, Environment: connection.Environment, Disabled: disabled, Enabled: enabled})
 	if !s.config.Shared || !identity.IsAdmin() {
 		if decision, rowLimit, err = s.applyCustomPolicies(r, identity, connection, info, false, decision, rowLimit); err != nil {
 			return nil, errors.New("governance rules unavailable")

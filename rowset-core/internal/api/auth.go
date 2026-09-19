@@ -2,8 +2,6 @@ package api
 
 import (
 	"net/http"
-	"strings"
-	"sync"
 	"time"
 
 	"github.com/rowsetdev/rowset-studio/rowset-core/internal/auth"
@@ -12,65 +10,9 @@ import (
 )
 
 const (
-	refreshCookie      = "rowset_refresh"
-	refreshTTLDays     = 14
-	loginMaxFailures   = 5
-	loginLockoutPeriod = 15 * time.Minute
+	refreshCookie  = "rowset_refresh"
+	refreshTTLDays = 14
 )
-
-var dummyPassword struct {
-	sync.Once
-	hash string
-}
-
-type loginRequest struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
-}
-
-func (s *Server) login(w http.ResponseWriter, r *http.Request) {
-	var request loginRequest
-	if !decodeJSON(w, r, &request) {
-		return
-	}
-	email := strings.ToLower(strings.TrimSpace(request.Email))
-	if len(request.Password) > 1024 || s.loginLocked(r, email) {
-		if len(request.Password) > 1024 {
-			writeError(w, http.StatusUnauthorized, "BAD_CREDENTIALS", "invalid email or password")
-		} else {
-			writeError(w, http.StatusTooManyRequests, "RATE_LIMITED", "too many failed attempts, try again later")
-		}
-		return
-	}
-	user, err := s.store.UserByEmail(r.Context(), email)
-	valid := err == nil && user.Status == "active"
-	hash := user.PasswordHash
-	if !valid {
-		dummyPassword.Do(func() { dummyPassword.hash, _ = auth.HashPassword("rowset-dummy-password") })
-		hash = dummyPassword.hash
-	}
-	if auth.VerifyPassword(request.Password, hash) != nil || !valid {
-		_ = s.store.RecordLoginFailure(r.Context(), email, time.Now().UTC().Format(time.RFC3339), int64(loginLockoutPeriod.Seconds()))
-		writeError(w, http.StatusUnauthorized, "BAD_CREDENTIALS", "invalid email or password")
-		return
-	}
-	_ = s.store.ClearLoginFailures(r.Context(), email)
-	role, err := s.store.UserRole(r.Context(), user.ID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "INTERNAL", "user role is missing")
-		return
-	}
-	s.issueSession(w, r, domain.Identity{UserID: user.ID, OrgID: user.OrgID, Email: user.Email, Role: role.Name}, user.PasswordHash, nil)
-}
-
-func (s *Server) loginLocked(r *http.Request, email string) bool {
-	count, lastRaw, ok, err := s.store.LoginFailureState(r.Context(), email)
-	if err != nil || !ok || count < loginMaxFailures {
-		return false
-	}
-	last, err := time.Parse(time.RFC3339, lastRaw)
-	return err == nil && time.Since(last) < loginLockoutPeriod
-}
 
 func (s *Server) refresh(w http.ResponseWriter, r *http.Request) {
 	cookie, err := r.Cookie(refreshCookie)
@@ -88,7 +30,7 @@ func (s *Server) refresh(w http.ResponseWriter, r *http.Request) {
 		s.noRefreshSession(w)
 		return
 	}
-	role, err := s.store.UserRole(r.Context(), user.ID)
+	role, err := s.role(r.Context(), user.ID)
 	if err != nil {
 		s.noRefreshSession(w)
 		return

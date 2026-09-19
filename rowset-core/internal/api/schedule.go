@@ -201,27 +201,10 @@ func (s *Server) validateScheduled(r *http.Request, identity domain.Identity, in
 	if !engine.SupportsScheduledSQL(connection.Engine) {
 		return "", errors.New("scheduled queries are not available for this engine")
 	}
-	role, err := s.store.UserRole(r.Context(), identity.UserID)
-	if err != nil || !s.canUseConnection(r, identity, role.ID, connection) {
+	if !s.canUseConnection(r.Context(), identity, connection) {
 		return "", errors.New("unknown connection")
 	}
 	return input.SQL, nil
-}
-
-func (s *Server) canUseConnection(r *http.Request, identity domain.Identity, roleID string, connection domain.Connection) bool {
-	if connection.OrgID != identity.OrgID {
-		return false
-	}
-	if identity.IsAdmin() {
-		return true
-	}
-	items, _ := s.store.ListRoleConnectionAccess(r.Context(), roleID)
-	for _, item := range items {
-		if item.ConnectionID == connection.ID {
-			return true
-		}
-	}
-	return false
 }
 
 func nextRunString(spec scheduleSpec, enabled bool, now time.Time) (*string, error) {

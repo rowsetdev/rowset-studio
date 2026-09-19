@@ -47,6 +47,7 @@ type Server struct {
 	resultHooks         []resultHook
 	routeRegistrars     []RouteRegistrar
 	escalation          Escalation
+	access              Access
 	connectionDetails   []func(context.Context, domain.Connection, map[string]any)
 	connectionSaveHooks []ConnectionSaveHook
 	connectionFields    map[string]bool
@@ -169,11 +170,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/meta/engines", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"engines": []string{"postgres", "mysql", "mariadb", "mssql"}, "capabilities": engine.AllEngineCapabilities()})
 	})
-	mux.HandleFunc("POST /api/auth/login", s.login)
 	mux.HandleFunc("POST /api/auth/refresh", s.refresh)
 	mux.HandleFunc("POST /api/auth/logout", s.logout)
 	mux.Handle("GET /api/auth/me", s.authenticated(http.HandlerFunc(s.me)))
-	mux.Handle("PATCH /api/users/{id}/password", s.requireAdmin(http.HandlerFunc(s.setUserPassword)))
 	mux.Handle("GET /api/connections", s.authenticated(http.HandlerFunc(s.listConnections)))
 	mux.Handle("POST /api/connections", s.requireAdmin(http.HandlerFunc(s.createConnection)))
 	mux.Handle("PUT /api/connections/{id}", s.requireAdmin(http.HandlerFunc(s.updateConnection)))
@@ -332,8 +331,8 @@ func (s *Server) authenticate(r *http.Request) (domain.Identity, error) {
 	if err != nil || user.Status != "active" || user.OrgID != tokenIdentity.OrgID {
 		return domain.Identity{}, errors.New("account disabled or no longer valid")
 	}
-	role, err := s.store.UserRole(r.Context(), user.ID)
-	if err != nil || role.OrgID != user.OrgID {
+	role, err := s.role(r.Context(), user.ID)
+	if err != nil {
 		return domain.Identity{}, errors.New("role missing")
 	}
 	currentAuth := auth.PasswordAuthVersion(user.PasswordHash)

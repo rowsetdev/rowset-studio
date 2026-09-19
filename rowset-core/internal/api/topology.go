@@ -41,23 +41,11 @@ func effectiveNodeRole(policy, defaultRole string, requested *string) (string, e
 }
 
 func (s *Server) desiredNodeRole(ctx context.Context, identity domain.Identity, connectionID string, requested *string) (string, error) {
-	if identity.IsAdmin() {
-		return effectiveNodeRole("user_selectable", "primary", requested)
-	}
-	role, err := s.store.UserRole(ctx, identity.UserID)
-	if err != nil {
+	grant, ok := s.connectionGrant(ctx, identity, connectionID)
+	if !ok {
 		return "", errors.New("role has no access to this connection")
 	}
-	access, err := s.store.ListRoleConnectionAccess(ctx, role.ID)
-	if err != nil {
-		return "", err
-	}
-	for _, item := range access {
-		if item.ConnectionID == connectionID {
-			return effectiveNodeRole(item.NodePolicy, item.DefaultNodeRole, requested)
-		}
-	}
-	return "", errors.New("role has no access to this connection")
+	return effectiveNodeRole(grant.NodePolicy, grant.DefaultNodeRole, requested)
 }
 
 func (s *Server) routedEngineConnection(ctx context.Context, identity domain.Identity, connection domain.Connection, database string, requested *string, info *sqlguard.Info) (engine.Connection, string, error) {

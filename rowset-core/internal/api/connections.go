@@ -71,19 +71,9 @@ func (s *Server) listConnections(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !identity.IsAdmin() {
-		role, err := s.store.UserRole(r.Context(), identity.UserID)
-		if err != nil {
-			writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "role missing")
-			return
-		}
-		access, _ := s.store.ListRoleConnectionAccess(r.Context(), role.ID)
-		allowed := map[string]domain.RoleConnectionAccess{}
-		for _, item := range access {
-			allowed[item.ConnectionID] = item
-		}
 		visible := connections[:0]
 		for _, connection := range connections {
-			if _, ok := allowed[connection.ID]; ok {
+			if _, ok := s.connectionGrant(r.Context(), identity, connection.ID); ok {
 				visible = append(visible, connection)
 			}
 		}
@@ -116,15 +106,9 @@ func (s *Server) connectionJSON(r *http.Request, connection domain.Connection, i
 		result["nodePolicy"] = "user_selectable"
 		result["defaultNodeRole"] = "primary"
 	} else if !identity.IsAdmin() {
-		if role, err := s.store.UserRole(r.Context(), identity.UserID); err == nil {
-			access, _ := s.store.ListRoleConnectionAccess(r.Context(), role.ID)
-			for _, item := range access {
-				if item.ConnectionID == connection.ID {
-					result["nodePolicy"] = item.NodePolicy
-					result["defaultNodeRole"] = item.DefaultNodeRole
-					break
-				}
-			}
+		if grant, ok := s.connectionGrant(r.Context(), identity, connection.ID); ok {
+			result["nodePolicy"] = grant.NodePolicy
+			result["defaultNodeRole"] = grant.DefaultNodeRole
 		}
 	}
 	return result
@@ -747,17 +731,8 @@ func (s *Server) authorizedConnection(w http.ResponseWriter, r *http.Request) (d
 		writeError(w, http.StatusNotFound, "NOT_FOUND", "connection not found")
 		return connection, false
 	}
-	if identity.IsAdmin() {
+	if _, ok := s.connectionGrant(r.Context(), identity, connection.ID); ok {
 		return connection, true
-	}
-	role, err := s.store.UserRole(r.Context(), identity.UserID)
-	if err == nil {
-		access, _ := s.store.ListRoleConnectionAccess(r.Context(), role.ID)
-		for _, item := range access {
-			if item.ConnectionID == connection.ID {
-				return connection, true
-			}
-		}
 	}
 	writeError(w, http.StatusForbidden, "POLICY_DENIED", "role has no access to this connection")
 	return connection, false

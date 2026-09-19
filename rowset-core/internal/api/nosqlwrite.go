@@ -34,7 +34,7 @@ func nosqlStatement(kind sqlguard.Kind, database, object string, hasWhere bool) 
 // a connection themselves.
 func (s *Server) nosqlPolicyAllowed(w http.ResponseWriter, r *http.Request, connection domain.Connection, info sqlguard.Info, rawBody string) (timeout int, ok bool) {
 	identity := identityFromContext(r.Context())
-	role, err := s.store.UserRole(r.Context(), identity.UserID)
+	role, err := s.role(r.Context(), identity.UserID)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "role missing")
 		return 0, false
@@ -44,7 +44,7 @@ func (s *Server) nosqlPolicyAllowed(w http.ResponseWriter, r *http.Request, conn
 		writeError(w, 500, "INTERNAL", "policies unavailable")
 		return 0, false
 	}
-	decision := policy.Evaluate(policy.Input{Statement: info, Role: role.Name, ReadOnly: role.IsReadOnly || connection.ReadOnly, Environment: connection.Environment, Disabled: disabled, Enabled: enabled})
+	decision := policy.Evaluate(policy.Input{Statement: info, Role: role.Name, ReadOnly: role.ReadOnly || connection.ReadOnly, Environment: connection.Environment, Disabled: disabled, Enabled: enabled})
 	decision, _, err = s.applyCustomPolicies(r, identity, connection, info, false, decision, 0)
 	if err != nil {
 		writeError(w, 500, "INTERNAL", "policies unavailable")
