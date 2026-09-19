@@ -150,8 +150,12 @@ func printHelp(options Options) {
 		names = append(names, name)
 	}
 	sort.Strings(names)
+	width := len("desktop-stop")
 	for _, name := range names {
-		fmt.Printf("  rowset %-14s %s\n", name, options.Commands[name].Usage)
+		width = max(width, len(name))
+	}
+	for _, name := range names {
+		fmt.Printf("  rowset %-*s %s\n", width, name, options.Commands[name].Usage)
 	}
 	fmt.Printf("\nDefault command: %s\n", options.DefaultCommand)
 }
