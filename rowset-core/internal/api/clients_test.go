@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	sqlguard "github.com/rowsetdev/rowset-studio/rowset-core/sqlguard"
 )
 
 // Statements from other clients go through the same hooks, policies and
@@ -79,4 +81,24 @@ func TestRunAppliesHooksPoliciesAndRecordsActivity(t *testing.T) {
 	if err != nil || len(history) < 2 {
 		t.Fatalf("activity: %v %v", history, err)
 	}
+}
+
+func TestSessionControlRunsOnlySessionStatements(t *testing.T) {
+	for _, sql := range []string{"SET search_path TO public", "SAVEPOINT before_change", "RELEASE SAVEPOINT before_change"} {
+		info, err := sqlguardParse(sql)
+		if err != nil || info != "session" {
+			t.Fatalf("%q classified as %q (%v)", sql, info, err)
+		}
+	}
+	session := &Session{}
+	for _, sql := range []string{"DELETE FROM people", "SELECT 1", "UPDATE people SET email = 'x'"} {
+		if _, err := session.Control(context.Background(), sql); err == nil {
+			t.Fatalf("%q ran outside the pipeline", sql)
+		}
+	}
+}
+
+func sqlguardParse(sql string) (string, error) {
+	info, err := sqlguard.Parse(sql)
+	return string(info.Kind), err
 }

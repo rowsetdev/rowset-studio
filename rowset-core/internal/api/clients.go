@@ -47,9 +47,22 @@ func (s *Session) Begin(options engine.TransactionOptions) error {
 	return s.backend.Begin(options)
 }
 func (s *Session) InTransaction() bool { return s != nil && s.backend.InTransaction() }
-func (s *Session) Commit() error       { return s.backend.Commit() }
-func (s *Session) Rollback() error     { return s.backend.Rollback() }
-func (s *Session) Close() error        { return s.backend.Close() }
+
+// Control runs a statement that only changes the session's own state (SET,
+// SAVEPOINT, RELEASE and the like); every other statement goes through Run.
+func (s *Session) Control(ctx context.Context, sql string) (engine.Result, error) {
+	info, err := sqlguard.Parse(sql)
+	if err != nil {
+		return engine.Result{}, err
+	}
+	if info.Kind != sqlguard.Session {
+		return engine.Result{}, errors.New("only session control statements run outside the pipeline")
+	}
+	return s.backend.Execute(ctx, sql, 0)
+}
+func (s *Session) Commit() error   { return s.backend.Commit() }
+func (s *Session) Rollback() error { return s.backend.Rollback() }
+func (s *Session) Close() error    { return s.backend.Close() }
 
 // ResultStream hands rows to the caller one at a time, with result hook
 // transforms applied, and stops at the policy row limit. Close it when the
