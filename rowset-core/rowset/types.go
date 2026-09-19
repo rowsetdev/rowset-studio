@@ -12,6 +12,7 @@ import (
 	"github.com/rowsetdev/rowset-studio/rowset-core/internal/id"
 	"github.com/rowsetdev/rowset-studio/rowset-core/internal/policy"
 	"github.com/rowsetdev/rowset-studio/rowset-core/internal/store"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/vault"
 )
 
 // Domain types.
@@ -174,3 +175,11 @@ func HashPassword(password string) (string, error) { return auth.HashPassword(pa
 
 // VerifyPassword checks a password against a hash from HashPassword.
 func VerifyPassword(password, hash string) error { return auth.VerifyPassword(password, hash) }
+
+// Vault encrypts and decrypts stored secrets; Kit.Vault is the one a server
+// uses.
+type Vault = vault.Vault
+
+// NewVault creates a vault for an encryption key (and the previous key,
+// during rotation).
+func NewVault(key, previous []byte) (*Vault, error) { return vault.New(key, previous) }
