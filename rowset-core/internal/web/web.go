@@ -11,11 +11,18 @@ import (
 //go:embed dist
 var studio embed.FS
 
+// Handler serves the Studio build embedded in this module.
 func Handler() http.Handler {
 	root, err := fs.Sub(studio, "dist")
 	if err != nil {
 		panic(err)
 	}
+	return HandlerFor(root)
+}
+
+// HandlerFor serves a single-page app build: files as they are, index.html
+// for every other path.
+func HandlerFor(root fs.FS) http.Handler {
 	files := http.FileServer(http.FS(root))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requested := strings.TrimPrefix(path.Clean(r.URL.Path), "/")

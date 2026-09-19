@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"io/fs"
 	"log/slog"
 	"net/http"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/rowsetdev/rowset-studio/rowset-core/internal/domain"
 	"github.com/rowsetdev/rowset-studio/rowset-core/internal/store"
 	"github.com/rowsetdev/rowset-studio/rowset-core/internal/vault"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/web"
 )
 
 // RouteRegistrar mounts additional HTTP endpoints. Handlers must be wrapped
@@ -96,3 +98,7 @@ func (s *Server) AddConnectionSaveHook(fields []string, hook ConnectionSaveHook)
 	}
 	s.connectionSaveHooks = append(s.connectionSaveHooks, hook)
 }
+
+// SetWebUI serves a different Studio build (a single-page app: files as they
+// are, index.html for every other path). Call before Handler.
+func (s *Server) SetWebUI(build fs.FS) { s.webUI = web.HandlerFor(build) }

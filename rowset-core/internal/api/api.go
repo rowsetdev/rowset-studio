@@ -48,6 +48,7 @@ type Server struct {
 	routeRegistrars     []RouteRegistrar
 	escalation          Escalation
 	access              Access
+	webUI               http.Handler
 	connectionDetails   []func(context.Context, domain.Connection, map[string]any)
 	connectionSaveHooks []ConnectionSaveHook
 	connectionFields    map[string]bool
@@ -262,7 +263,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, "NOT_FOUND", "route not found")
 	})
-	mux.Handle("/", web.Handler())
+	ui := s.webUI
+	if ui == nil {
+		ui = web.Handler()
+	}
+	mux.Handle("/", ui)
 	return s.middleware(mux)
 }
 
