@@ -9,6 +9,7 @@ import (
 	"github.com/rowsetdev/rowset-studio/rowset-core/internal/auth"
 	"github.com/rowsetdev/rowset-studio/rowset-core/internal/config"
 	"github.com/rowsetdev/rowset-studio/rowset-core/internal/domain"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/engine"
 	"github.com/rowsetdev/rowset-studio/rowset-core/internal/id"
 	"github.com/rowsetdev/rowset-studio/rowset-core/internal/policy"
 	"github.com/rowsetdev/rowset-studio/rowset-core/internal/store"
@@ -52,6 +53,12 @@ type (
 	Access             = api.Access
 	AccessRole         = api.AccessRole
 	ConnectionGrant    = api.ConnectionGrant
+	Client             = api.Client
+	Outcome            = api.Outcome
+	Session            = api.Session
+	ResultStream       = api.ResultStream
+	Result             = engine.Result
+	TransactionOptions = engine.TransactionOptions
 )
 
 // Storage.
