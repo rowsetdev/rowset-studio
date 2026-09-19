@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
@@ -87,4 +88,16 @@ func (e Env) Do(t testing.TB, server *rowset.Server, method, path string, body a
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)
 	return response
+}
+
+// NewServer builds a server over a control database with the given
+// configuration; setup functions run before it handles requests.
+func NewServer(t testing.TB, cfg rowset.Config, data *rowset.Store, logger *slog.Logger, setup ...func(*rowset.Server)) *rowset.Server {
+	t.Helper()
+	server := api.New(cfg, data, auth.NewIssuer(strings.Repeat("s", 32), ""), logger)
+	t.Cleanup(func() { server.Close() })
+	for _, apply := range setup {
+		apply(server)
+	}
+	return server
 }
