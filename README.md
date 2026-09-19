@@ -280,8 +280,15 @@ release workflow, which tests, builds and publishes the assets.
 | --- | --- |
 | `rowset-core` | Go server: API, database engines, local store |
 | `rowset-core/sqlguard` | SQL classification and rewriting used by policies |
+| `rowset-core/rowset` | the public Go package for building Rowset with plugins |
 | `rowset-studio` | React/TypeScript Studio (Vite, TanStack Query, Monaco) |
 | `deploy/desktop` | macOS menu-bar wrapper |
+
+Rowset can be extended from another project. In Go, require
+`github.com/rowsetdev/rowset-studio/rowset-core` and run `rowset.Main` with
+your plugins (see the `rowset` package documentation). In the front end,
+install `@rowsetdev/studio` from this repository and call
+`mountStudio(root, { extensions })`.
 
 ```sh
 (cd rowset-core && go vet ./... && go test ./...)
