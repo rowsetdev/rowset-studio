@@ -1,8 +1,3 @@
-import { FormEvent, useState } from "react";
-import { useNavigate } from "react-router";
-import { useAuth } from "../lib/auth";
-import { ApiError } from "../lib/api";
-import { Button, ErrorText, Field, Input } from "../components/ui";
 import { Icon } from "../components/Icon";
 import RowsetLogo from "../components/RowsetLogo";
 import { useInstance, useShared } from "../lib/instance";
@@ -21,40 +16,20 @@ const personalCopy: SignInCopy = {
     { icon: "lock", label: "Local storage", note: "Encrypted credentials and query history on your computer." },
   ],
 };
-const sharedCopy = extensions.find((item) => item.signIn)?.signIn;
-const productLabel = extensions.find((item) => item.productLabel)?.productLabel;
-
 function useSignIn() {
   const shared = useShared();
+  const sharedCopy = extensions.find((item) => item.signIn)?.signIn;
+  const productLabel = extensions.find((item) => item.productLabel)?.productLabel;
   return { copy: shared && sharedCopy ? sharedCopy : personalCopy, label: shared && productLabel ? productLabel : "Community" };
 }
 
 export default function Login() {
   const { copy } = useSignIn();
   const desktop = Boolean(useInstance().data?.desktop);
-  const login = useAuth((s) => s.login);
-  const navigate = useNavigate();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setError("");
-    try {
-      await login(email, password);
-      navigate("/");
-    } catch (err) {
-      setError(err instanceof ApiError ? err.body.message : "Login failed");
-    } finally {
-      setBusy(false);
-    }
-  }
+  const SignInForm = extensions.find((item) => item.signInForm)?.signInForm;
 
   // The desktop app signs in through its launcher, never with a password.
-  if (desktop) {
+  if (desktop || !SignInForm) {
     return (
       <AuthShell title="Open Rowset Studio" subtitle="This session ended. Open Rowset Studio again to continue where you left off.">
         <ul className="space-y-2 text-[13px] leading-5 text-slate-600 dark:text-slate-300">
@@ -68,18 +43,7 @@ export default function Login() {
 
   return (
     <AuthShell title="Sign in" subtitle={copy.subtitle}>
-      <form onSubmit={onSubmit} className="space-y-4">
-        <Field label="Email">
-          <Input value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="username" required />
-        </Field>
-        <Field label="Password">
-          <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required />
-        </Field>
-        <ErrorText>{error}</ErrorText>
-        <Button type="submit" disabled={busy} className="w-full">
-          {busy ? "Signing in…" : "Sign in"}
-        </Button>
-      </form>
+      <SignInForm />
     </AuthShell>
   );
 }

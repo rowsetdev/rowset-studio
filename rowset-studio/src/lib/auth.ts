@@ -12,7 +12,8 @@ export interface Identity {
   email?: string;
 }
 
-interface AuthResponse {
+/** The body of a successful sign-in, refresh or desktop sign-in response. */
+export interface AuthResponse {
   accessToken: string;
   user: {
     user_id: string;
@@ -23,19 +24,6 @@ interface AuthResponse {
 }
 
 const USER_KEY = "rowset.user";
-const BOOTSTRAP_ADMIN_EMAIL = "admin@rowset.studio";
-
-function passwordAdviceKey(userId: string) {
-  return `rowset.password-advice-dismissed.${userId}`;
-}
-
-function shouldShowPasswordAdvice(user: Identity | null): boolean {
-  return Boolean(
-    user?.role === "admin" &&
-      user.email?.toLowerCase() === BOOTSTRAP_ADMIN_EMAIL &&
-      !localStorage.getItem(passwordAdviceKey(user.userId)),
-  );
-}
 
 interface AuthState {
   token: string | null;
@@ -43,9 +31,6 @@ interface AuthState {
   // "restoring" while the refresh-cookie exchange for a persisted session is
   // in flight; route guards should wait instead of bouncing to /login.
   status: "restoring" | "ready";
-  showPasswordAdvice: boolean;
-  dismissPasswordAdvice: () => void;
-  login: (email: string, password: string) => Promise<void>;
   logout: () => void;
 }
 
@@ -72,35 +57,19 @@ function clearSession() {
 
 const persistedUser = safeParse(localStorage.getItem(USER_KEY));
 
-export const useAuth = create<AuthState>((set, get) => ({
+export const useAuth = create<AuthState>(() => ({
   token: null,
   user: persistedUser,
   // The HttpOnly cookie is the source of truth. Always attempt restoration:
   // localStorage may have been cleared independently while the server session
   // is still valid, and treating that as signed out made reloads unreliable.
   status: "restoring",
-  showPasswordAdvice: shouldShowPasswordAdvice(persistedUser),
-
-  dismissPasswordAdvice: () => {
-    const user = get().user;
-    if (user) localStorage.setItem(passwordAdviceKey(user.userId), "true");
-    set({ showPasswordAdvice: false });
-  },
-
-  login: async (email, password) => {
-    const res = await api<AuthResponse>("/auth/login", {
-      method: "POST",
-      body: JSON.stringify({ email, password }),
-    });
-    const user = applySession(res);
-    set({ token: res.accessToken, user, status: "ready", showPasswordAdvice: shouldShowPasswordAdvice(user) });
-  },
 
   logout: () => {
     // Revokes the refresh-token family and clears the cookie server-side.
     void api("/auth/logout", { method: "POST" }).catch(() => undefined);
     clearSession();
-    useAuth.setState({ token: null, user: null, status: "ready", showPasswordAdvice: false });
+    useAuth.setState({ token: null, user: null, status: "ready" });
   },
 }));
 
@@ -112,7 +81,7 @@ async function tryRefresh(): Promise<string | null> {
       const res = await api<AuthResponse | undefined>("/auth/refresh", { method: "POST" });
       if (!res) break;
       const user = applySession(res);
-      useAuth.setState({ token: res.accessToken, user, status: "ready", showPasswordAdvice: shouldShowPasswordAdvice(user) });
+      useAuth.setState({ token: res.accessToken, user, status: "ready" });
       return res.accessToken;
     } catch (error) {
       // A missing/expired cookie is definitive. Network failures and 5xx
@@ -123,8 +92,14 @@ async function tryRefresh(): Promise<string | null> {
     }
   }
   clearSession();
-  useAuth.setState({ token: null, user: null, status: "ready", showPasswordAdvice: false });
+  useAuth.setState({ token: null, user: null, status: "ready" });
   return null;
+}
+
+/** Starts a session from a sign-in response, such as a sign-in form's. */
+export function startSession(res: AuthResponse) {
+  const user = applySession(res);
+  useAuth.setState({ token: res.accessToken, user, status: "ready" });
 }
 
 // initAuth installs the refresh hook and restores a persisted session.
@@ -134,7 +109,7 @@ export function initAuth() {
   if (ticket) {
     window.history.replaceState(null, "", window.location.pathname + window.location.search);
     void api<AuthResponse>("/auth/local", { method: "POST", body: JSON.stringify({ ticket }) })
-      .then(res => { const user = applySession(res); useAuth.setState({ token: res.accessToken, user, status: "ready", showPasswordAdvice: false }); })
+      .then(startSession)
       .catch(() => void tryRefresh());
   } else void tryRefresh();
 }

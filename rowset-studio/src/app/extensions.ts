@@ -59,9 +59,9 @@ export interface PolicyAction {
   matches: (policyKey: string) => boolean;
 }
 
-// A Studio extension adds pages and page parts to the app shell. Every module
-// in ./extensions is loaded at build time; a build without that directory
-// simply has no extensions. Page parts apply on shared servers only.
+// A Studio extension adds pages and page parts to the app shell. Extensions
+// are passed to mountStudio (and every module in ./extensions is loaded at
+// build time). Page parts apply on shared servers only.
 export interface StudioExtension {
   /** Routes mounted under the signed-in app shell. */
   routes?: RouteObject[];
@@ -75,6 +75,12 @@ export interface StudioExtension {
   productLabel?: string;
   /** Sign-in panel copy. */
   signIn?: SignInCopy;
+  /** The sign-in form of a server that is not a desktop workspace. */
+  signInForm?: ComponentType;
+  /** Notices shown above every page of the signed-in shell. */
+  notices?: ComponentType[];
+  /** Extra sections of the Account page. */
+  accountSections?: ComponentType[];
   /** Actions offered with a policy denial in the editor. */
   denialActions?: ComponentType<{ error: unknown; context: DenialContext }>[];
   /** Badges describing a result in the editor status bar. */
@@ -97,6 +103,11 @@ export interface StudioExtension {
 const modules = import.meta.glob<{ default: StudioExtension }>("./extensions/*.tsx", { eager: true });
 
 export const extensions: StudioExtension[] = Object.values(modules).map((module) => module.default);
+
+/** Adds extensions; call before the app renders (mountStudio does). */
+export function registerExtensions(list: StudioExtension[]) {
+  extensions.push(...list);
+}
 
 /** Extensions whose page parts apply to this server. */
 export function useActiveExtensions(): StudioExtension[] {

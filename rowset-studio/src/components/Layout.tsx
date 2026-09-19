@@ -14,9 +14,7 @@ import CommandPalette from "./CommandPalette";
 export default function ProtectedLayout() {
   const token = useAuth((s) => s.token);
   const status = useAuth((s) => s.status);
-  const showPasswordAdvice = useAuth((s) => s.showPasswordAdvice);
-  const dismissPasswordAdvice = useAuth((s) => s.dismissPasswordAdvice);
-  const navigate = useNavigate();
+  const notices = extensions.flatMap((item) => item.notices ?? []);
   const location = useLocation();
   // The SQL editor always opens with the navigation collapsed, because the
   // explorer needs the width; expanding it there lasts for that visit only.
@@ -52,22 +50,7 @@ export default function ProtectedLayout() {
         }}
       />
       <main className="flex-1 overflow-auto p-3">
-        {showPasswordAdvice && (
-          <div className="mb-3 flex items-center gap-3 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100">
-            <Icon name="key" size={17} className="shrink-0" />
-            <p className="flex-1">Change the temporary installation password for the bootstrap administrator.</p>
-            <button
-              type="button"
-              onClick={() => navigate("/account")}
-              className="rounded-md bg-amber-900 px-3 py-1.5 font-medium text-white hover:bg-amber-800 dark:bg-amber-300 dark:text-amber-950 dark:hover:bg-amber-200"
-            >
-              Review password
-            </button>
-            <button type="button" onClick={dismissPasswordAdvice} className="p-1 text-amber-700 hover:text-amber-950 dark:text-amber-300 dark:hover:text-white" title="Dismiss">
-              <Icon name="close" size={15} />
-            </button>
-          </div>
-        )}
+        {notices.map((Notice, index) => <Notice key={index} />)}
         <Suspense fallback={<div className="p-5 text-sm text-slate-400">Loading…</div>}>
 		  <InstanceBoundary><Outlet /></InstanceBoundary>
         </Suspense>
@@ -92,15 +75,15 @@ const personalGroups: NavGroup[] = [
     { to: "/account", label: "Account", icon: "key" },
   ] },
 ];
-const extensionGroups = extensions.flatMap((item) => item.navGroups ?? []);
-const sidebarWidgets = extensions.flatMap((item) => item.sidebarWidgets ?? []);
-const productLabel = extensions.find((item) => item.productLabel)?.productLabel ?? "Community";
 
 const appVersion = import.meta.env.VITE_ROWSET_VERSION || "dev";
 const vendor = import.meta.env.VITE_ROWSET_VENDOR ?? "";
 const commandPaletteShortcut = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⇧⌘K" : "Ctrl+Shift+K";
 
 function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
+  const extensionGroups = extensions.flatMap((item) => item.navGroups ?? []);
+  const sidebarWidgets = extensions.flatMap((item) => item.sidebarWidgets ?? []);
+  const productLabel = extensions.find((item) => item.productLabel)?.productLabel ?? "Community";
   const shared = useShared();
   // The desktop app signs in by itself, so it has nothing to sign out of.
   const desktop = Boolean(useInstance().data?.desktop);

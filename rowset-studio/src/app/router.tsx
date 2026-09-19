@@ -10,9 +10,8 @@ import { useQuery } from "@tanstack/react-query";
 import { listConnections } from "../features/connections/api";
 import { extensions } from "./extensions";
 
-const extensionHome = extensions.find((item) => item.homePath)?.homePath;
-
 function WorkspaceHome() {
+  const extensionHome = extensions.find((item) => item.homePath)?.homePath;
   const { data } = useInstance();
   const personal = !extensionHome || data?.mode !== "shared";
   const connections = useQuery({ queryKey: ["connections"], queryFn: listConnections, enabled: Boolean(data) && personal });
@@ -32,11 +31,11 @@ const SchedulesPage = lazy(() => import("../features/schedules/SchedulesPage"));
 const SchemaComparePage = lazy(() => import("../features/editor/SchemaComparePage"));
 const ErDiagramPage = lazy(() => import("../features/diagram/ErDiagramPage"));
 
-const extensionRoutes: RouteObject[] = extensions.flatMap((item) => item.routes ?? []);
-
 // Public auth routes plus the signed-in app shell; extensions add their pages
 // under the same shell.
-export const router = createBrowserRouter([
+export function createRouter() {
+  const extensionRoutes: RouteObject[] = extensions.flatMap((item) => item.routes ?? []);
+  return createBrowserRouter([
   { path: "/login", element: <Login />, errorElement: <AppErrorBoundary /> },
   {
     element: <ProtectedLayout />,
@@ -65,3 +64,4 @@ export const router = createBrowserRouter([
     ],
   },
 ]);
+}

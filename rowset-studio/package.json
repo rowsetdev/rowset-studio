@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "test": "node --experimental-strip-types --test src/features/editor/*.test.mjs src/features/notifications/*.test.mjs src/features/connections/*.test.mjs src/features/notebooks/*.test.mjs src/features/schedules/*.test.mjs",
+    "test": "node --experimental-strip-types --test src/features/editor/*.test.mjs src/features/notifications/*.test.mjs src/features/connections/*.test.mjs src/features/notebooks/*.test.mjs src/features/schedules/*.test.mjs src/app/*.test.mjs",
     "test:e2e": "node e2e/desktop.mjs",
     "test:e2e:postgres": "node e2e/postgres.mjs",
     "audit:prod": "node scripts/audit-production.mjs",

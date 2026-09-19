@@ -1,10 +1,8 @@
-import { useState, type FormEvent } from "react";
-import { useNavigate } from "react-router";
-import { useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { useAuth } from "../lib/auth";
-import { setUserPassword } from "../lib/account";
 import { useInstance } from "../lib/instance";
-import { Button, ErrorText, Field, Input, PageHeader, Panel } from "../components/ui";
+import { extensions } from "../app/extensions";
+import { PageHeader, Panel } from "../components/ui";
 import { Icon, type IconName } from "../components/Icon";
 import { rowBackupEnabled, setRowBackupEnabled } from "../lib/preferences";
 import AiSettingsPanel from "../features/ai/AiSettingsPanel";
@@ -14,37 +12,11 @@ const appVersion = import.meta.env.VITE_ROWSET_VERSION || "dev";
 
 export default function Account() {
   const user = useAuth((s) => s.user);
-  const logout = useAuth((s) => s.logout);
-  const dismiss = useAuth((s) => s.dismissPasswordAdvice);
   const { data: instance } = useInstance();
   const shared = instance?.mode === "shared";
   const desktop = Boolean(instance?.desktop);
-  const navigate = useNavigate();
-  const qc = useQueryClient();
-  const [password, setPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
   const [rowBackup, setRowBackup] = useState(rowBackupEnabled);
-
-  async function save(event: FormEvent) {
-    event.preventDefault();
-    if (!user) return;
-    if (password !== confirm) { setError("Passwords must match."); return; }
-    setBusy(true);
-    setError("");
-    try {
-      await setUserPassword(user.userId, password);
-      dismiss();
-      logout();
-      qc.clear();
-      navigate("/login");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to change the password.");
-    } finally {
-      setBusy(false);
-    }
-  }
+  const sections = extensions.flatMap((item) => item.accountSections ?? []);
 
   return (
     <div className="max-w-3xl space-y-5">
@@ -93,24 +65,7 @@ export default function Account() {
 
       {!shared && <SlackSettingsPanel />}
 
-      {!desktop && <Panel className="p-4">
-        <h2 className="text-[14px] font-semibold text-slate-900 dark:text-slate-100">Change password</h2>
-        <p className="mt-1 text-[12px] text-slate-500 dark:text-slate-400">
-          You will sign in again with the new password.
-        </p>
-        <form onSubmit={save} className="mt-4 grid max-w-md gap-3">
-          <Field label="New password">
-            <Input type="password" autoComplete="new-password" minLength={8} required value={password} onChange={(e) => setPassword(e.target.value)} />
-          </Field>
-          <Field label="Confirm new password">
-            <Input type="password" autoComplete="new-password" minLength={8} required value={confirm} onChange={(e) => setConfirm(e.target.value)} />
-          </Field>
-          <ErrorText>{error}</ErrorText>
-          <div>
-            <Button type="submit" disabled={busy}>{busy ? "Saving…" : "Change password"}</Button>
-          </div>
-        </form>
-      </Panel>}
+      {sections.map((Section, index) => <Section key={index} />)}
     </div>
   );
 }
