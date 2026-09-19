@@ -18,22 +18,21 @@ import (
 
 // Domain types.
 type (
-	Identity             = domain.Identity
-	Connection           = domain.Connection
-	ConnectionNode       = domain.ConnectionNode
-	ColumnOrigin         = domain.ColumnOrigin
-	User                 = domain.User
-	Role                 = domain.Role
-	Organization         = domain.Organization
-	RoleConnectionAccess = domain.RoleConnectionAccess
-	Secret               = domain.Secret
-	AuditLog             = domain.AuditLog
-	QueryHistory         = domain.QueryHistory
-	Decision             = policy.Decision
-	Effect               = policy.Effect
-	Risk                 = policy.Risk
-	CustomPolicy         = domain.CustomPolicy
-	Config               = config.Config
+	Identity       = domain.Identity
+	Connection     = domain.Connection
+	ConnectionNode = domain.ConnectionNode
+	ColumnOrigin   = domain.ColumnOrigin
+	User           = domain.User
+	Role           = domain.Role
+	Organization   = domain.Organization
+	Secret         = domain.Secret
+	AuditLog       = domain.AuditLog
+	QueryHistory   = domain.QueryHistory
+	Decision       = policy.Decision
+	Effect         = policy.Effect
+	Risk           = policy.Risk
+	CustomPolicy   = domain.CustomPolicy
+	Config         = config.Config
 )
 
 // Extension points of a server; see Server's Add* and Set* methods.

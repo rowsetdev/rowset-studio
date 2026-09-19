@@ -46,13 +46,6 @@ type Role struct {
 	IsReadOnly bool   `json:"isReadonly"`
 }
 
-type RoleConnectionAccess struct {
-	ConnectionID    string `json:"connectionId"`
-	AccessLevel     string `json:"accessLevel"`
-	NodePolicy      string `json:"nodePolicy"`
-	DefaultNodeRole string `json:"defaultNodeRole"`
-}
-
 type Connection struct {
 	ID                  string  `json:"id"`
 	OrgID               string  `json:"orgId"`

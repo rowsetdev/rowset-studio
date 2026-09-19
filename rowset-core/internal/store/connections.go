@@ -192,38 +192,4 @@ func (s *Store) DeleteSecret(ctx context.Context, id string) error {
 	return err
 }
 
-func (s *Store) ListRoleConnectionAccess(ctx context.Context, roleID string) ([]domain.RoleConnectionAccess, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT connection_id,access_level,node_policy,default_node_role FROM role_connection_access WHERE role_id=?", roleID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var result []domain.RoleConnectionAccess
-	for rows.Next() {
-		var item domain.RoleConnectionAccess
-		if err := rows.Scan(&item.ConnectionID, &item.AccessLevel, &item.NodePolicy, &item.DefaultNodeRole); err != nil {
-			return nil, err
-		}
-		result = append(result, item)
-	}
-	return result, rows.Err()
-}
-
-func (s *Store) SetRoleConnectionAccess(ctx context.Context, roleID string, access []domain.RoleConnectionAccess) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, "DELETE FROM role_connection_access WHERE role_id=?", roleID); err != nil {
-		return err
-	}
-	for _, item := range access {
-		if _, err := tx.ExecContext(ctx, "INSERT INTO role_connection_access(role_id,connection_id,access_level,node_policy,default_node_role) VALUES(?,?,?,?,?)", roleID, item.ConnectionID, item.AccessLevel, item.NodePolicy, item.DefaultNodeRole); err != nil {
-			return mapError(err)
-		}
-	}
-	return tx.Commit()
-}
-
 func placeholders(count int) string { return strings.TrimRight(strings.Repeat("?,", count), ",") }

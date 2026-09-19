@@ -43,9 +43,9 @@ func TestReopenPreservesUsersRolesAndConnections(t *testing.T) {
 	if err != nil || gotUser.ID != user.ID {
 		t.Fatalf("user was not preserved: %#v %v", gotUser, err)
 	}
-	gotRole, err := second.UserRole(ctx, user.ID)
-	if err != nil || gotRole.ID != role.ID {
-		t.Fatalf("role was not preserved: %#v %v", gotRole, err)
+	var roleID string
+	if err := second.db.QueryRowContext(ctx, "SELECT role_id FROM user_roles WHERE user_id=?", user.ID).Scan(&roleID); err != nil || roleID != role.ID {
+		t.Fatalf("role was not preserved: %q %v", roleID, err)
 	}
 	// Rows written without tls_mode (older backups) keep the unverified
 	// encryption PostgreSQL connections always had.
