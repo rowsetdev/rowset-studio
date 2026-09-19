@@ -42,7 +42,15 @@ type ChainBreak struct {
 	AuditID string
 }
 
-const auditChainScanQuery = "SELECT id, org_id, user_id, connection_id, query_hash, started_at, policy_decision, sql, error_message, client_ip, rows_returned, rows_affected, prev_hash, entry_hash, hash_version FROM audit_logs WHERE org_id IS NOT NULL AND entry_hash IS NOT NULL ORDER BY org_id, rowid"
+// auditChainScanQuery reads what each entry's hash covers, including the
+// reference column when one is configured.
+func auditChainScanQuery() string {
+	reference := "''"
+	if auditReferenceColumn != "" {
+		reference = auditReferenceColumn
+	}
+	return "SELECT id, org_id, user_id, connection_id, query_hash, started_at, policy_decision, sql, error_message, client_ip, rows_returned, rows_affected, prev_hash, entry_hash, hash_version, " + reference + " FROM audit_logs WHERE org_id IS NOT NULL AND entry_hash IS NOT NULL ORDER BY org_id, rowid"
+}
 
 // VerifyAuditChain walks every organization's audit hash chain in insertion
 // order and confirms each entry's hash still matches what PrepareAudit wrote
@@ -51,7 +59,7 @@ const auditChainScanQuery = "SELECT id, org_id, user_id, connection_id, query_ha
 // one, since a single edit invalidates the rest of that org's chain too) and
 // how many entries were checked in total.
 func (s *Store) VerifyAuditChain(ctx context.Context) ([]ChainBreak, int, error) {
-	rows, err := s.db.QueryContext(ctx, auditChainScanQuery)
+	rows, err := s.db.QueryContext(ctx, auditChainScanQuery())
 	if err != nil {
 		return nil, 0, err
 	}
@@ -62,15 +70,16 @@ func (s *Store) VerifyAuditChain(ctx context.Context) ([]ChainBreak, int, error)
 	checked := 0
 	for rows.Next() {
 		var item domain.AuditLog
-		var orgID, userID, connectionID, queryHash, startedAt, policyDecision, sqlText, errorMessage, clientIP, prevHash sql.NullString
+		var orgID, userID, connectionID, queryHash, startedAt, policyDecision, sqlText, errorMessage, clientIP, prevHash, reference sql.NullString
 		var rowsReturned, rowsAffected sql.NullInt64
-		if err := rows.Scan(&item.ID, &orgID, &userID, &connectionID, &queryHash, &startedAt, &policyDecision, &sqlText, &errorMessage, &clientIP, &rowsReturned, &rowsAffected, &prevHash, &item.EntryHash, &item.HashVersion); err != nil {
+		if err := rows.Scan(&item.ID, &orgID, &userID, &connectionID, &queryHash, &startedAt, &policyDecision, &sqlText, &errorMessage, &clientIP, &rowsReturned, &rowsAffected, &prevHash, &item.EntryHash, &item.HashVersion, &reference); err != nil {
 			return nil, 0, err
 		}
 		item.OrgID, item.UserID, item.ConnectionID, item.QueryHash = orgID.String, userID.String, connectionID.String, queryHash.String
 		item.StartedAt, item.PolicyDecision, item.SQL, item.ErrorMessage, item.ClientIP = startedAt.String, policyDecision.String, sqlText.String, errorMessage.String, clientIP.String
 		item.RowsReturned, item.RowsReturnedSet = rowsReturned.Int64, rowsReturned.Valid
 		item.RowsAffected, item.RowsAffectedSet = rowsAffected.Int64, rowsAffected.Valid
+		item.Reference = reference.String
 		checked++
 		if broken[item.OrgID] {
 			continue

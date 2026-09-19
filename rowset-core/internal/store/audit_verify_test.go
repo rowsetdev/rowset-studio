@@ -48,3 +48,34 @@ func TestVerifyAuditChainDetectsTampering(t *testing.T) {
 		t.Fatalf("expected exactly one break for org-1, got %v", breaks)
 	}
 }
+
+// Entries whose hash covers a reference kept in an extension's column verify
+// as intact, and a changed reference is caught.
+func TestVerifyAuditChainCoversTheReferenceColumn(t *testing.T) {
+	ctx := context.Background()
+	data, err := Open(ctx, t.TempDir()+"/rowset.sqlite3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer data.Close()
+	if _, err := data.db.ExecContext(ctx, "ALTER TABLE audit_logs ADD COLUMN reference_id TEXT"); err != nil {
+		t.Fatal(err)
+	}
+	auditReferenceColumn = "reference_id"
+	defer func() { auditReferenceColumn = "" }()
+	for i, reference := range []string{"", "ref-1"} {
+		entry := domain.AuditLog{ID: "audit-" + strconv.Itoa(i), OrgID: "org-1", UserID: "user-1", SQL: "SELECT 1", StartedAt: NowString(), CreatedAt: NowString(), PolicyDecision: "allow", Reference: reference}
+		if err := data.WriteAudit(ctx, entry); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if breaks, checked, err := data.VerifyAuditChain(ctx); err != nil || len(breaks) != 0 || checked != 2 {
+		t.Fatalf("intact chain: breaks=%v checked=%d err=%v", breaks, checked, err)
+	}
+	if _, err := data.db.ExecContext(ctx, "UPDATE audit_logs SET reference_id = 'ref-2' WHERE id = 'audit-1'"); err != nil {
+		t.Fatal(err)
+	}
+	if breaks, _, err := data.VerifyAuditChain(ctx); err != nil || len(breaks) != 1 {
+		t.Fatalf("changed reference: breaks=%v err=%v", breaks, err)
+	}
+}

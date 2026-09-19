@@ -301,9 +301,48 @@ var revisedMigrations = map[int64]string{
 	7: "4fb7b519e5b0e7f3ee425877039684f8506f387f766f762d0ad0721d1282e510",
 }
 
-// schemaExtensions run after the migrations on every open and must be
-// idempotent.
+// Extension adds a plugin's tables and data rules to the store. Register
+// extensions before the first Open.
+type Extension struct {
+	// Migrate creates or updates the plugin's tables. It runs after the
+	// store's own migrations every time the database opens and must be
+	// idempotent.
+	Migrate func(context.Context, *sql.Conn) error
+	// ConnectionTables have a connection_id column; their rows are deleted
+	// together with the connection.
+	ConnectionTables []string
+	// DefaultPolicies are seeded into a new workspace with the built-in ones.
+	DefaultPolicies []DefaultPolicy
+	// AuditReferenceColumn is an audit_logs column (added by Migrate) that
+	// stores AuditLog.Reference.
+	AuditReferenceColumn string
+	// RecordedMode reports an installation mode recorded by an earlier
+	// release, for a database that has no mode marker yet.
+	RecordedMode func(context.Context, *sql.Tx) (string, error)
+}
+
+// DefaultPolicy is a built-in policy a new workspace starts with.
+type DefaultPolicy struct {
+	Key, Config string
+	Enabled     bool
+}
+
 var schemaExtensions []func(context.Context, *sql.Conn) error
+
+// RegisterExtension adds a plugin's schema and data rules.
+func RegisterExtension(extension Extension) {
+	if extension.Migrate != nil {
+		schemaExtensions = append(schemaExtensions, extension.Migrate)
+	}
+	connectionTables = append(connectionTables, extension.ConnectionTables...)
+	defaultPolicies = append(defaultPolicies, extension.DefaultPolicies...)
+	if extension.AuditReferenceColumn != "" {
+		auditReferenceColumn = extension.AuditReferenceColumn
+	}
+	if extension.RecordedMode != nil {
+		recordedMode = extension.RecordedMode
+	}
+}
 
 func (s *Store) migrate(ctx context.Context) error {
 	migrations, err := loadMigrations()
@@ -472,26 +511,23 @@ func NowString() string { return time.Now().UTC().Format(time.RFC3339) }
 // defaultPolicies seed a new workspace. Unbounded SELECTs remain available,
 // while limit_rows still prevents an accidental read from filling the editor.
 // Every policy can be changed later in My policies.
-var defaultPolicies = []struct {
-	key, config string
-	enabled     bool
-}{
-	{key: "deny_select_without_where", enabled: false},
-	{key: "deny_delete_without_where", enabled: true},
-	{key: "deny_update_without_where", enabled: true},
-	{key: "deny_drop", enabled: true},
-	{key: "deny_truncate", enabled: true},
-	{key: "deny_unclassified", enabled: true},
-	{key: "limit_rows", config: "10000", enabled: true},
+var defaultPolicies = []DefaultPolicy{
+	{Key: "deny_select_without_where", Enabled: false},
+	{Key: "deny_delete_without_where", Enabled: true},
+	{Key: "deny_update_without_where", Enabled: true},
+	{Key: "deny_drop", Enabled: true},
+	{Key: "deny_truncate", Enabled: true},
+	{Key: "deny_unclassified", Enabled: true},
+	{Key: "limit_rows", Config: "10000", Enabled: true},
 }
 
 func seedDefaultPolicies(ctx context.Context, tx *sql.Tx, orgID string) error {
 	for _, policy := range defaultPolicies {
 		var config any
-		if policy.config != "" {
-			config = policy.config
+		if policy.Config != "" {
+			config = policy.Config
 		}
-		if _, err := tx.ExecContext(ctx, "INSERT INTO policies(id,org_id,name,rule_type,effect,enabled,config) VALUES(lower(hex(randomblob(16))),?,?,?,'deny',?,?) ON CONFLICT(org_id,rule_type) DO NOTHING", orgID, policy.key, policy.key, policy.enabled, config); err != nil {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO policies(id,org_id,name,rule_type,effect,enabled,config) VALUES(lower(hex(randomblob(16))),?,?,?,'deny',?,?) ON CONFLICT(org_id,rule_type) DO NOTHING", orgID, policy.Key, policy.Key, policy.Enabled, config); err != nil {
 			return mapError(err)
 		}
 	}
