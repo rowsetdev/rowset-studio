@@ -2,7 +2,7 @@ package api
 
 import (
 	"encoding/json"
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/domain"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/domain"
 	"net/http/httptest"
 	"strings"
 	"testing"

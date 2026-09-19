@@ -10,12 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/domain"
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine"
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/id"
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/policy"
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/store"
-	sqlguard "github.com/dbaopsio/rowset-studio/rowset-parser"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/domain"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/engine"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/id"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/policy"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/store"
+	sqlguard "github.com/rowsetdev/rowset-studio/rowset-core/sqlguard"
 )
 
 type queryInput struct {

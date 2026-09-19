@@ -4,9 +4,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/domain"
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/id"
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/policy"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/domain"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/id"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/policy"
 )
 
 // recordClientActivity writes history and an activity entry for a statement

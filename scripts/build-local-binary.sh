@@ -15,8 +15,7 @@ EXT=""
   VITE_ROWSET_VERSION="$VERSION" npm run build
 )
 cp "$ROOT_DIR/rowset-core/go.mod" "$ROOT_DIR/rowset-core/go.sum" "$BUILD_DIR/rowset-core/"
-cp -R "$ROOT_DIR/rowset-core/cmd" "$ROOT_DIR/rowset-core/internal" "$BUILD_DIR/rowset-core/"
-cp -R "$ROOT_DIR/rowset-parser" "$BUILD_DIR/rowset-parser"
+cp -R "$ROOT_DIR/rowset-core/cmd" "$ROOT_DIR/rowset-core/internal" "$ROOT_DIR/rowset-core/sqlguard" "$BUILD_DIR/rowset-core/"
 cp -R "$ROOT_DIR/rowset-studio/dist/." "$BUILD_DIR/rowset-core/internal/web/dist/"
 (
   cd "$BUILD_DIR/rowset-core"

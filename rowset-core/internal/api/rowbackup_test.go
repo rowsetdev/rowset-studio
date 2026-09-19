@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/store"
-	sqlguard "github.com/dbaopsio/rowset-studio/rowset-parser"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/store"
+	sqlguard "github.com/rowsetdev/rowset-studio/rowset-core/sqlguard"
 )
 
 func TestBackupTargetOf(t *testing.T) {

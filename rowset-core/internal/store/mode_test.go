@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/domain"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/domain"
 )
 
 func TestSharedModeCannotBeReversed(t *testing.T) {

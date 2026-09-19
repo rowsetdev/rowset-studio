@@ -1,7 +1,7 @@
-// Package parser provides Rowset's dialect-aware SQL security analysis.
+// Package sqlguard provides Rowset's dialect-aware SQL security analysis.
 // It deliberately models only the structure needed for policy enforcement,
 // statement rewriting, result-lineage fallback, and query fingerprinting.
-package parser
+package sqlguard
 
 import (
 	"crypto/sha256"

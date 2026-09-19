@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	sqlguard "github.com/dbaopsio/rowset-studio/rowset-parser"
+	sqlguard "github.com/rowsetdev/rowset-studio/rowset-core/sqlguard"
 )
 
 func TestCassandraCQLExportUsesServerJSONAndEscapesLiteral(t *testing.T) {

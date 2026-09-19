@@ -16,10 +16,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/api"
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/auth"
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/config"
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/store"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/api"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/auth"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/config"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/store"
 )
 
 type desktopState struct {

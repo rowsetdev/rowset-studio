@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/domain"
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/store"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/domain"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/store"
 )
 
 func notebookCall(t *testing.T, handler http.HandlerFunc, identity domain.Identity, notebookID string, body any) *httptest.ResponseRecorder {

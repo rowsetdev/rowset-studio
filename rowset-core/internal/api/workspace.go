@@ -5,7 +5,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/store"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/store"
 )
 
 // workspaceLimit caps the saved editor tabs. A personal workspace keeps

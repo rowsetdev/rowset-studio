@@ -5,11 +5,11 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/activity"
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/config"
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/domain"
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/store"
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/vault"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/activity"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/config"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/domain"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/store"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/vault"
 )
 
 // RouteRegistrar mounts additional HTTP endpoints. Handlers must be wrapped

@@ -33,11 +33,9 @@ jobs:
         run: test "v$(node -p "require('./rowset-studio/package.json').version")" = "$GITHUB_REF_NAME"
       - name: Test
         run: |
-          (cd rowset-parser && go test ./...) & parser_pid=$!
           (cd rowset-core && go vet ./... && go test ./...) & core_pid=$!
           (cd rowset-studio && npm run lint && npm test) & studio_pid=$!
           status=0
-          wait "$parser_pid" || status=1
           wait "$core_pid" || status=1
           wait "$studio_pid" || status=1
           exit "$status"

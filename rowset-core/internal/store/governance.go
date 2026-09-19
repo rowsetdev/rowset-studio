@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/domain"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/domain"
 )
 
 func (s *Store) ListPolicyOverrides(ctx context.Context, orgID string) ([]domain.PolicyOverride, error) {

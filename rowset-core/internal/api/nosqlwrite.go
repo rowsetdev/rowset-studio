@@ -5,10 +5,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/domain"
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine"
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/policy"
-	sqlguard "github.com/dbaopsio/rowset-studio/rowset-parser"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/domain"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/engine"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/policy"
+	sqlguard "github.com/rowsetdev/rowset-studio/rowset-core/sqlguard"
 )
 
 // nosqlStatement builds the sqlguard.Info a MongoDB/Redis/Elasticsearch

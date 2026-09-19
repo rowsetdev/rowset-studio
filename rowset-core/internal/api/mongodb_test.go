@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine"
-	sqlguard "github.com/dbaopsio/rowset-studio/rowset-parser"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/engine"
+	sqlguard "github.com/rowsetdev/rowset-studio/rowset-core/sqlguard"
 )
 
 func TestMongoFilterPolicyPredicate(t *testing.T) {

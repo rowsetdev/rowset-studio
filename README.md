@@ -279,12 +279,11 @@ release workflow, which tests, builds and publishes the assets.
 | Directory | Contents |
 | --- | --- |
 | `rowset-core` | Go server: API, database engines, local store |
-| `rowset-parser` | SQL classification and rewriting used by policies |
+| `rowset-core/sqlguard` | SQL classification and rewriting used by policies |
 | `rowset-studio` | React/TypeScript Studio (Vite, TanStack Query, Monaco) |
 | `deploy/desktop` | macOS menu-bar wrapper |
 
 ```sh
-(cd rowset-parser && go test ./...)
 (cd rowset-core && go vet ./... && go test ./...)
 (cd rowset-studio && npm run build && npm run lint && npm test)
 GOCACHE=/tmp/rowset-build-cache sh scripts/build-local-binary.sh

@@ -9,10 +9,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/domain"
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine"
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/id"
 	"github.com/jackc/pgx/v5"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/domain"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/engine"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/id"
 )
 
 // transactionIdleTimeout is how long a manual transaction may sit unused

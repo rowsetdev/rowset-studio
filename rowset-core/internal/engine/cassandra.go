@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	sqlguard "github.com/dbaopsio/rowset-studio/rowset-parser"
 	"github.com/gocql/gocql"
+	sqlguard "github.com/rowsetdev/rowset-studio/rowset-core/sqlguard"
 	"golang.org/x/crypto/ssh"
 	"gopkg.in/inf.v0"
 )

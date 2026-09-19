@@ -17,14 +17,14 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/domain"
-	sqlguard "github.com/dbaopsio/rowset-studio/rowset-parser"
 	mysqlclient "github.com/go-mysql-org/go-mysql/client"
 	gosqlmysql "github.com/go-sql-driver/mysql"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
 	mssql "github.com/microsoft/go-mssqldb"
 	"github.com/microsoft/go-mssqldb/msdsn"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/domain"
+	sqlguard "github.com/rowsetdev/rowset-studio/rowset-core/sqlguard"
 	"golang.org/x/crypto/ssh"
 )
 

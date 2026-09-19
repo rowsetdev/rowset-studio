@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/domain"
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/domain"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/engine"
 )
 
 func TestConnectionUsernameSupportsNewAndLegacyPayloads(t *testing.T) {

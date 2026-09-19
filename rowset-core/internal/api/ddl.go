@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/engine"
 )
 
 // objectDDL returns the statement that creates a database object, so the

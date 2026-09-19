@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/store"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/store"
 )
 
 // Notifications are posted to a Slack incoming webhook the user creates and

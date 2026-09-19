@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/domain"
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/store"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/domain"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/store"
 )
 
 // Assistants are reached either through a provider's API with the user's own

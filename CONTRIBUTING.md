@@ -21,7 +21,6 @@ See [Build requirements](README.md#build-requirements) and
 directory layout and the commands below.
 
 ```sh
-(cd rowset-parser && go test ./...)
 (cd rowset-core && go vet ./... && go test ./...)
 (cd rowset-studio && npm ci && npm run build && npm run lint && npm test)
 ```

@@ -8,7 +8,6 @@ Closes #
 
 ## Testing
 
-- [ ] `(cd rowset-parser && go test ./...)`
 - [ ] `(cd rowset-core && go vet ./... && go test ./...)`
 - [ ] `(cd rowset-studio && npm run build && npm run lint && npm test)`
 - [ ] Manually verified in the app (describe how, and which engine(s) if relevant)

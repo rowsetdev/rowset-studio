@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/engine"
 )
 
 // End-to-end through the HTTP handlers Studio uses: a manual transaction that

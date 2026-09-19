@@ -35,8 +35,7 @@ trap 'exit 130' HUP INT TERM
 )
 mkdir -p "$WORK/src/rowset-core"
 cp "$ROOT_DIR/rowset-core/go.mod" "$ROOT_DIR/rowset-core/go.sum" "$WORK/src/rowset-core/"
-cp -R "$ROOT_DIR/rowset-core/cmd" "$ROOT_DIR/rowset-core/internal" "$WORK/src/rowset-core/"
-cp -R "$ROOT_DIR/rowset-parser" "$WORK/src/rowset-parser"
+cp -R "$ROOT_DIR/rowset-core/cmd" "$ROOT_DIR/rowset-core/internal" "$ROOT_DIR/rowset-core/sqlguard" "$WORK/src/rowset-core/"
 rm -rf "$WORK/src/rowset-core/internal/web/dist"
 cp -R "$ROOT_DIR/rowset-studio/dist" "$WORK/src/rowset-core/internal/web/dist"
 

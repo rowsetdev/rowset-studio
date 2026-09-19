@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"strings"
 
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/domain"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/domain"
 )
 
 const connectionColumns = "id,org_id,name,alias,engine,host,port,database,environment,tls_required,tech_username,secret_id,created_at,query_timeout_seconds,tls_mode,tls_server_name,tls_ca_pem,tls_client_cert_pem,tls_client_key_secret_id,ssh_host,ssh_port,ssh_user,ssh_auth_method,ssh_known_host,ssh_secret_id,ssh_passphrase_secret_id,read_only,cassandra_consistency,cassandra_page_size"

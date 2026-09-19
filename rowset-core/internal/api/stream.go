@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/domain"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/domain"
 )
 
 // streamColumnOrigins reports the table column behind each result column, or

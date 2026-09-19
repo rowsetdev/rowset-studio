@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/config"
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/domain"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/config"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/domain"
 )
 
 func TestEffectiveNodeRoleEnforcesRolePolicy(t *testing.T) {

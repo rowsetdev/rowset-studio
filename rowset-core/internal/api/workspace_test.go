@@ -10,7 +10,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/domain"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/domain"
 )
 
 func workspaceRequest(s *Server, identity domain.Identity, method, body string) *httptest.ResponseRecorder {

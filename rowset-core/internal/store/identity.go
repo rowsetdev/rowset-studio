@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/domain"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/domain"
 )
 
 const userColumns = "id,org_id,email,password_hash,status,created_at"

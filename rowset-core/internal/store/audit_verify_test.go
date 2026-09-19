@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/domain"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/domain"
 )
 
 func TestVerifyAuditChainDetectsTampering(t *testing.T) {

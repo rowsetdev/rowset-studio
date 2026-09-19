@@ -1,10 +1,9 @@
-module github.com/dbaopsio/rowset-studio/rowset-core
+module github.com/rowsetdev/rowset-studio/rowset-core
 
 go 1.25.7
 
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.48.0
-	github.com/dbaopsio/rowset-studio/rowset-parser v0.0.0
 	github.com/duckdb/duckdb-go/v2 v2.10505.0
 	github.com/elastic/go-elasticsearch/v8 v8.19.7
 	github.com/go-mysql-org/go-mysql v1.16.0
@@ -19,8 +18,6 @@ require (
 	gopkg.in/inf.v0 v0.9.1
 	modernc.org/sqlite v1.56.0
 )
-
-replace github.com/dbaopsio/rowset-studio/rowset-parser => ../rowset-parser
 
 require (
 	filippo.io/edwards25519 v1.2.0 // indirect

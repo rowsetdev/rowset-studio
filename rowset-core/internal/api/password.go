@@ -3,7 +3,7 @@ package api
 import (
 	"net/http"
 
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/auth"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/auth"
 )
 
 // setUserPassword changes an account password and ends that account's

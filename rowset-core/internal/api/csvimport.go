@@ -14,11 +14,11 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/domain"
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine"
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/id"
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/policy"
-	sqlguard "github.com/dbaopsio/rowset-studio/rowset-parser"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/domain"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/engine"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/id"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/policy"
+	sqlguard "github.com/rowsetdev/rowset-studio/rowset-core/sqlguard"
 )
 
 const (

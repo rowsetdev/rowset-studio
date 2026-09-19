@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/domain"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/domain"
 )
 
 // A ';' hidden behind '#' on PostgreSQL must be seen and refused as multiple

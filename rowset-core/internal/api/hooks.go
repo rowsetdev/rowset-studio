@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/domain"
-	sqlguard "github.com/dbaopsio/rowset-studio/rowset-parser"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/domain"
+	sqlguard "github.com/rowsetdev/rowset-studio/rowset-core/sqlguard"
 )
 
 // StatementRequest describes a statement that passed policy checks and is

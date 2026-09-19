@@ -6,10 +6,10 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine"
 	"github.com/go-sql-driver/mysql"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/microsoft/go-mssqldb"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/engine"
 )
 
 func databaseDiagnostic(err error, sql string) map[string]any {

@@ -14,9 +14,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: rowset-core/go.mod
-          cache-dependency-path: |
-            rowset-core/go.sum
-            rowset-parser/go.sum
+          cache-dependency-path: rowset-core/go.sum
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -27,7 +25,6 @@ jobs:
         working-directory: rowset-studio
       - name: Go
         run: |
-          (cd rowset-parser && go test ./...)
           (cd rowset-core && go vet ./... && go test ./...)
       - name: Studio
         working-directory: rowset-studio
@@ -73,9 +70,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: rowset-core/go.mod
-          cache-dependency-path: |
-            rowset-core/go.sum
-            rowset-parser/go.sum
+          cache-dependency-path: rowset-core/go.sum
       - name: Start isolated database
         env:
           DB_ENGINE: ${{ matrix.engine }}
@@ -160,9 +155,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: rowset-core/go.mod
-          cache-dependency-path: |
-            rowset-core/go.sum
-            rowset-parser/go.sum
+          cache-dependency-path: rowset-core/go.sum
       - name: Start isolated SQL server
         env:
           DB_ENGINE: ${{ matrix.engine }}

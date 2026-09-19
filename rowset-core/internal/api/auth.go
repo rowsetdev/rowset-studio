@@ -6,9 +6,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/auth"
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/domain"
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/id"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/auth"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/domain"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/id"
 )
 
 const (

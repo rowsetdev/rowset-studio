@@ -11,15 +11,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/activity"
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/auth"
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/config"
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/domain"
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/engine"
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/policy"
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/store"
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/vault"
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/web"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/activity"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/auth"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/config"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/domain"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/engine"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/policy"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/store"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/vault"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/web"
 )
 
 type Server struct {

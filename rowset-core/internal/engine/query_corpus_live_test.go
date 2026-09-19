@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	sqlguard "github.com/dbaopsio/rowset-studio/rowset-parser"
+	sqlguard "github.com/rowsetdev/rowset-studio/rowset-core/sqlguard"
 )
 
 func TestLiveThreeHundredDialectEdgeQueries(t *testing.T) {

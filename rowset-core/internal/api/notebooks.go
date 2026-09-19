@@ -7,9 +7,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/domain"
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/id"
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/store"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/domain"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/id"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/store"
 )
 
 const (

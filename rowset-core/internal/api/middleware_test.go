@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/config"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/config"
 )
 
 func TestMiddlewareSecurityCORSCompressionAndRateLimit(t *testing.T) {

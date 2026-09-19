@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/domain"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/domain"
 )
 
 func TestPolicyTimeoutTakesShortestDeadline(t *testing.T) {

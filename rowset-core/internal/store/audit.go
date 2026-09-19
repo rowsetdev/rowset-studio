@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/dbaopsio/rowset-studio/rowset-core/internal/domain"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/domain"
 )
 
 const currentAuditHashVersion int64 = 2
