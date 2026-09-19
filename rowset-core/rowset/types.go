@@ -1,10 +1,12 @@
 package rowset
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/rowsetdev/rowset-studio/rowset-core/internal/activity"
 	"github.com/rowsetdev/rowset-studio/rowset-core/internal/api"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/config"
 	"github.com/rowsetdev/rowset-studio/rowset-core/internal/domain"
 	"github.com/rowsetdev/rowset-studio/rowset-core/internal/id"
 	"github.com/rowsetdev/rowset-studio/rowset-core/internal/policy"
@@ -25,6 +27,7 @@ type (
 	AuditLog             = domain.AuditLog
 	QueryHistory         = domain.QueryHistory
 	Decision             = policy.Decision
+	Config               = config.Config
 )
 
 // Extension points of a server; see Server's Add* and Set* methods.
@@ -82,4 +85,15 @@ func WriteStoreError(w http.ResponseWriter, err error) { api.WriteStoreError(w, 
 // has already written the error response.
 func DecodeJSON(w http.ResponseWriter, r *http.Request, target any) bool {
 	return api.DecodeJSON(w, r, target)
+}
+
+// OpenStore opens a control database, creating it or bringing its schema up
+// to date, including the tables registered with AddStorage. When backupDir
+// is not empty, a copy of an existing database is written there before a
+// migration changes it.
+func OpenStore(ctx context.Context, path, backupDir string) (*Store, error) {
+	if backupDir == "" {
+		return store.Open(ctx, path)
+	}
+	return store.Open(ctx, path, store.WithMigrationBackup(backupDir))
 }

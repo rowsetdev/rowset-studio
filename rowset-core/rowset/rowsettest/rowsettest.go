@@ -1,5 +1,5 @@
-// Package apitest builds authenticated API servers for tests.
-package apitest
+// Package rowsettest builds authenticated Rowset servers for plugin tests.
+package rowsettest
 
 import (
 	"bytes"
@@ -15,15 +15,16 @@ import (
 	"github.com/rowsetdev/rowset-studio/rowset-core/internal/config"
 	"github.com/rowsetdev/rowset-studio/rowset-core/internal/domain"
 	"github.com/rowsetdev/rowset-studio/rowset-core/internal/store"
+	"github.com/rowsetdev/rowset-studio/rowset-core/rowset"
 )
 
 // Env is a fresh control database with one administrator and a bearer token
 // for that administrator.
 type Env struct {
-	Data   *store.Store
+	Data   *rowset.Store
 	Issuer *auth.Issuer
-	Config config.Config
-	Owner  domain.User
+	Config rowset.Config
+	Owner  rowset.User
 	Token  string
 }
 
@@ -59,7 +60,7 @@ func New(t testing.TB) Env {
 
 // Server builds an API server over the Env; setup functions (for example
 // registrars) run before the server handles requests.
-func (e Env) Server(t testing.TB, setup ...func(*api.Server)) *api.Server {
+func (e Env) Server(t testing.TB, setup ...func(*rowset.Server)) *rowset.Server {
 	t.Helper()
 	server := api.New(e.Config, e.Data, e.Issuer, nil)
 	t.Cleanup(func() { server.Close() })
@@ -70,7 +71,7 @@ func (e Env) Server(t testing.TB, setup ...func(*api.Server)) *api.Server {
 }
 
 // Do sends an authenticated JSON request through server's handler.
-func (e Env) Do(t testing.TB, server *api.Server, method, path string, body any) *httptest.ResponseRecorder {
+func (e Env) Do(t testing.TB, server *rowset.Server, method, path string, body any) *httptest.ResponseRecorder {
 	t.Helper()
 	var payload []byte
 	if body != nil {
