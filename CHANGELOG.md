@@ -3,9 +3,9 @@
 The version lives in `rowset-studio/package.json`. `scripts/build-local-binary.sh`
 and `scripts/package-macos.sh` stamp it into Studio (sidebar), the `rowset`
 executable and the macOS app. Every change set bumps the patch version and adds
-an entry here.
+an entry here; after x.y.99 the next version is x.(y+1).0.
 
-## 0.0.102 — 2026-09-19
+## 0.1.0 — 2026-09-19
 
 - Changed: Rowset can now be extended from another Go module and another
   front-end project instead of by editing this repository.
