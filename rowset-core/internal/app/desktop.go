@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"context"
@@ -40,7 +40,7 @@ func desktopDataDir() (string, error) {
 	return filepath.Join(root, "Rowset", "Community"), nil
 }
 
-func desktop() error {
+func desktop(command Context) error {
 	directory, err := desktopDataDir()
 	if err != nil {
 		return err
@@ -165,6 +165,9 @@ func desktop() error {
 	cfg.LocalShutdown = stop
 	app := api.New(cfg, data, auth.NewIssuer(cfg.JWTSecret, cfg.JWTSecretPrevious), buildLogger(filepath.Join(directory, "logs")))
 	defer app.Close()
+	if err := command.ConfigureServer(app); err != nil {
+		return err
+	}
 	server := &http.Server{Handler: app.Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 120 * time.Second}
 	state := desktopState{Port: port, Key: cfg.LocalLauncherKey}
 	raw, err := json.Marshal(state)
