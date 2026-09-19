@@ -5,6 +5,23 @@ and `scripts/package-macos.sh` stamp it into Studio (sidebar), the `rowset`
 executable and the macOS app. Every change set bumps the patch version and adds
 an entry here; after x.y.99 the next version is x.(y+1).0.
 
+## 0.1.1 — 2026-09-19
+
+- Changed: a shared installation now has everything a personal workspace
+  has — scheduled queries, row backups, the assistant and Slack settings,
+  MongoDB/Redis/Valkey/Elasticsearch reads and writes, and the SQLite,
+  DuckDB, ClickHouse and CockroachDB connections. On a shared server,
+  scheduled results are kept in a server folder per user
+  (`ROWSET_SCHEDULE_OUTPUT_DIR`, default `scheduled-results` next to the
+  database) and downloaded from the run list, and only administrators can
+  open a row backup's script, since it holds stored values; everyone can
+  restore their own backups.
+- Changed: extensions add navigation groups next to Studio's own pages
+  instead of replacing them.
+- Fixed: row backups on SQLite and DuckDB connections were always skipped
+  ("the changed rows could not be read"): the primary-key and column
+  lookups used PostgreSQL's catalog. Both now back up and restore.
+
 ## 0.1.0 — 2026-09-19
 
 - Changed: Rowset can now be extended from another Go module and another

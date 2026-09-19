@@ -27,7 +27,7 @@ import RedisQueryBar, { redisQuery } from "./RedisQueryBar";
 import ElasticsearchQueryBar, { elasticsearchQuery } from "./ElasticsearchQueryBar";
 import SnippetsMenu from "./SnippetsMenu";
 import { api, ApiError } from "../../lib/api";
-import { useEngineCapabilities, useShared } from "../../lib/instance";
+import { useEngineCapabilities } from "../../lib/instance";
 import { rowBackupEnabled } from "../../lib/preferences";
 import { useActiveExtensions, type DenialContext } from "../../app/extensions";
 import WorkspaceGate, { exportWorkspace, useWorkspacePersistence } from "./WorkspaceGate";
@@ -126,7 +126,6 @@ function EditorWorkspace({ snapshot, initial }: { snapshot: WorkspaceSnapshot; i
   const location = useLocation();
   const navigate = useNavigate();
   // Scheduled queries write files on this computer: personal workspaces only.
-  const shared = useShared();
   const openedFromNavigation = useRef<string | null>(null);
   useEffect(() => {
     const state = location.state as { openSql?: string; connectionId?: string | null; database?: string; title?: string; restoreOf?: string; openConnection?: boolean } | null;
@@ -519,7 +518,7 @@ function EditorWorkspace({ snapshot, initial }: { snapshot: WorkspaceSnapshot; i
       if (runSeq.current[tabId] === seq) patchRun(tabId, { data, message: `Receiving rows… ${data.rowCount}` });
     };
     // A restore script puts rows back; backing it up again would only add noise.
-    const backup = !skipBackup && !shared && !activeTab?.restoreOf && rowBackupEnabled();
+    const backup = !skipBackup && !activeTab?.restoreOf && rowBackupEnabled();
     const backupNotice = (result: { backup?: { id: string; rows: number }; backupSkipped?: string }): string | undefined => {
       if (result.backup) return `Backed up ${result.backup.rows} document(s); restore from Activity → Row backups.`;
       if (result.backupSkipped) return `No backup was taken: ${result.backupSkipped}.`;
@@ -700,7 +699,7 @@ function EditorWorkspace({ snapshot, initial }: { snapshot: WorkspaceSnapshot; i
     if (!tabId || multiControllers.current[tabId]) return;
     const controller = new AbortController();
     multiControllers.current[tabId] = controller;
-    const backup = !shared && rowBackupEnabled();
+    const backup = rowBackupEnabled();
     const publish = (outcomes: TargetOutcome[], running: boolean) => {
       if (closingTabs.current.has(tabId) || !mounted.current) return;
       setMultiRuns((current) => ({ ...current, [tabId]: { outcomes, statements: statements.length, running } }));
@@ -976,7 +975,7 @@ function EditorWorkspace({ snapshot, initial }: { snapshot: WorkspaceSnapshot; i
           onRunAll={onRunAll}
           onRunOnConnections={activeConnection && !["mongodb", "redis", "valkey", "elasticsearch"].includes(activeConnection.engine) ? onRunOnConnections : undefined}
           onExplain={(analyze) => void onExplain(analyze)}
-          onSchedule={!shared && activeConnection && !["mongodb", "redis", "valkey", "cassandra", "elasticsearch"].includes(activeConnection.engine) && !parameterList.length ? () => navigate("/schedules", { state: { newSchedule: { sql: statementUnderCursor(), connectionId: activeConnectionId, database: selectedDb } } }) : undefined}
+          onSchedule={activeConnection && !["mongodb", "redis", "valkey", "cassandra", "elasticsearch"].includes(activeConnection.engine) && !parameterList.length ? () => navigate("/schedules", { state: { newSchedule: { sql: statementUnderCursor(), connectionId: activeConnectionId, database: selectedDb } } }) : undefined}
           onStop={() => {
             if (transactions.current[activeTabId] && !window.confirm("Stopping a statement inside a transaction ends the transaction and discards its uncommitted changes. Stop anyway?")) return;
             scripts.current[activeTabId] = false; controllers.current[activeTabId]?.abort();

@@ -91,11 +91,7 @@ func NewWithActivity(cfg config.Config, data *store.Store, activityStore activit
 	server.scheduleRunning = map[string]bool{}
 	server.imports = map[string]*csvUpload{}
 	server.scheduleContext, server.stopSchedules = context.WithCancel(context.Background())
-	// Scheduled queries write files on this computer, so only personal
-	// workspaces run them.
-	if !cfg.Shared {
-		go server.scheduler(server.scheduleContext)
-	}
+	go server.scheduler(server.scheduleContext)
 	return server
 }
 
@@ -228,25 +224,24 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/notebooks/{id}", s.authenticated(http.HandlerFunc(s.getNotebook)))
 	mux.Handle("PUT /api/notebooks/{id}", s.authenticated(http.HandlerFunc(s.putNotebook)))
 	mux.Handle("DELETE /api/notebooks/{id}", s.authenticated(http.HandlerFunc(s.deleteNotebook)))
-	if !s.config.Shared {
-		mux.Handle("GET /api/scheduled-queries", s.authenticated(http.HandlerFunc(s.listScheduled)))
-		mux.Handle("GET /api/scheduled-queries/defaults", s.authenticated(http.HandlerFunc(s.scheduleDefaults)))
-		mux.Handle("POST /api/scheduled-queries", s.authenticated(http.HandlerFunc(s.createScheduled)))
-		mux.Handle("PUT /api/scheduled-queries/{id}", s.authenticated(http.HandlerFunc(s.updateScheduled)))
-		mux.Handle("DELETE /api/scheduled-queries/{id}", s.authenticated(http.HandlerFunc(s.deleteScheduled)))
-		mux.Handle("POST /api/scheduled-queries/{id}/run", s.authenticated(http.HandlerFunc(s.runScheduledNow)))
-		mux.Handle("GET /api/scheduled-queries/{id}/runs", s.authenticated(http.HandlerFunc(s.listScheduledRuns)))
-		mux.Handle("GET /api/slack/settings", s.authenticated(http.HandlerFunc(s.slackSettings)))
-		mux.Handle("PUT /api/slack/settings", s.authenticated(http.HandlerFunc(s.saveSlackSettings)))
-		mux.Handle("POST /api/slack/test", s.authenticated(http.HandlerFunc(s.testSlack)))
-		mux.Handle("GET /api/ai/settings", s.authenticated(http.HandlerFunc(s.aiSettings)))
-		mux.Handle("PUT /api/ai/settings", s.authenticated(http.HandlerFunc(s.saveAISettings)))
-		mux.Handle("POST /api/ai/ask", s.authenticated(http.HandlerFunc(s.askAI)))
-		mux.Handle("GET /api/row-backups", s.authenticated(http.HandlerFunc(s.listRowBackups)))
-		mux.Handle("GET /api/row-backups/{id}/restore", s.authenticated(http.HandlerFunc(s.rowBackupRestore)))
-		mux.Handle("POST /api/row-backups/{id}/apply", s.authenticated(http.HandlerFunc(s.applyRowBackup)))
-		mux.Handle("DELETE /api/row-backups/{id}", s.authenticated(http.HandlerFunc(s.deleteRowBackup)))
-	}
+	mux.Handle("GET /api/scheduled-queries", s.authenticated(http.HandlerFunc(s.listScheduled)))
+	mux.Handle("GET /api/scheduled-queries/defaults", s.authenticated(http.HandlerFunc(s.scheduleDefaults)))
+	mux.Handle("POST /api/scheduled-queries", s.authenticated(http.HandlerFunc(s.createScheduled)))
+	mux.Handle("PUT /api/scheduled-queries/{id}", s.authenticated(http.HandlerFunc(s.updateScheduled)))
+	mux.Handle("DELETE /api/scheduled-queries/{id}", s.authenticated(http.HandlerFunc(s.deleteScheduled)))
+	mux.Handle("POST /api/scheduled-queries/{id}/run", s.authenticated(http.HandlerFunc(s.runScheduledNow)))
+	mux.Handle("GET /api/scheduled-queries/{id}/runs", s.authenticated(http.HandlerFunc(s.listScheduledRuns)))
+	mux.Handle("GET /api/scheduled-queries/{id}/runs/{run_id}/file", s.authenticated(http.HandlerFunc(s.scheduledRunFile)))
+	mux.Handle("GET /api/slack/settings", s.authenticated(http.HandlerFunc(s.slackSettings)))
+	mux.Handle("PUT /api/slack/settings", s.authenticated(http.HandlerFunc(s.saveSlackSettings)))
+	mux.Handle("POST /api/slack/test", s.authenticated(http.HandlerFunc(s.testSlack)))
+	mux.Handle("GET /api/ai/settings", s.authenticated(http.HandlerFunc(s.aiSettings)))
+	mux.Handle("PUT /api/ai/settings", s.authenticated(http.HandlerFunc(s.saveAISettings)))
+	mux.Handle("POST /api/ai/ask", s.authenticated(http.HandlerFunc(s.askAI)))
+	mux.Handle("GET /api/row-backups", s.authenticated(http.HandlerFunc(s.listRowBackups)))
+	mux.Handle("GET /api/row-backups/{id}/restore", s.authenticated(http.HandlerFunc(s.rowBackupRestore)))
+	mux.Handle("POST /api/row-backups/{id}/apply", s.authenticated(http.HandlerFunc(s.applyRowBackup)))
+	mux.Handle("DELETE /api/row-backups/{id}", s.authenticated(http.HandlerFunc(s.deleteRowBackup)))
 	mux.Handle("POST /api/saved-queries", s.authenticated(http.HandlerFunc(s.createSavedQuery)))
 	mux.Handle("DELETE /api/saved-queries/{id}", s.authenticated(http.HandlerFunc(s.deleteSavedQuery)))
 	mux.Handle("GET /api/policies", s.authenticated(http.HandlerFunc(s.listPolicies)))

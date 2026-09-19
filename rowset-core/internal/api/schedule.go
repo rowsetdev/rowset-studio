@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -151,6 +152,16 @@ func (s *Server) openScheduledSQL(item store.ScheduledQuery) (string, error) {
 	return envelope.SQL, nil
 }
 
+// userOutputDir is where a shared server writes a user's results: users do
+// not choose folders on the server, and download their files instead.
+func (s *Server) userOutputDir(userID string) string {
+	root := s.config.ScheduleOutputDir
+	if root == "" {
+		root = filepath.Join(filepath.Dir(s.config.DBPath), "scheduled-results")
+	}
+	return filepath.Join(root, userID)
+}
+
 // defaultOutputDir is where results go unless the owner picks a folder.
 func defaultOutputDir() string {
 	home, err := os.UserHomeDir()
@@ -181,7 +192,9 @@ func (s *Server) validateScheduled(r *http.Request, identity domain.Identity, in
 	if err := input.Schedule.validate(); err != nil {
 		return "", err
 	}
-	if input.OutputDir == "" {
+	if s.config.Shared {
+		input.OutputDir = s.userOutputDir(identity.UserID)
+	} else if input.OutputDir == "" {
 		input.OutputDir = defaultOutputDir()
 	}
 	if !filepath.IsAbs(input.OutputDir) {
@@ -263,8 +276,47 @@ func (s *Server) listScheduled(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"schedules": out})
 }
 
-func (s *Server) scheduleDefaults(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) scheduleDefaults(w http.ResponseWriter, r *http.Request) {
+	if s.config.Shared {
+		writeJSON(w, http.StatusOK, map[string]any{"outputDir": s.userOutputDir(identityFromContext(r.Context()).UserID), "serverFolder": true})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"outputDir": defaultOutputDir()})
+}
+
+// scheduledRunFile downloads the result file of one of the caller's runs.
+func (s *Server) scheduledRunFile(w http.ResponseWriter, r *http.Request) {
+	item, err := s.store.ScheduledQuery(r.Context(), r.PathValue("id"), identityFromContext(r.Context()).UserID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "NOT_FOUND", "scheduled query not found")
+		return
+	}
+	runs, err := s.store.ListScheduledRuns(r.Context(), item.ID, 50)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "INTERNAL", "runs unavailable")
+		return
+	}
+	for _, run := range runs {
+		if run.ID != r.PathValue("run_id") || run.OutputPath == nil || *run.OutputPath == "" {
+			continue
+		}
+		// Only files inside the query's own folder are served.
+		path := filepath.Clean(*run.OutputPath)
+		if rel, err := filepath.Rel(filepath.Clean(item.OutputDir), path); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			break
+		}
+		file, err := os.Open(path)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "NOT_FOUND", "the result file is no longer there")
+			return
+		}
+		defer file.Close()
+		w.Header().Set("Content-Disposition", `attachment; filename="`+strings.ReplaceAll(filepath.Base(path), `"`, "")+`"`)
+		w.Header().Set("Content-Type", "application/octet-stream")
+		_, _ = io.Copy(w, file)
+		return
+	}
+	writeError(w, http.StatusNotFound, "NOT_FOUND", "result file not found")
 }
 
 func (s *Server) createScheduled(w http.ResponseWriter, r *http.Request) {

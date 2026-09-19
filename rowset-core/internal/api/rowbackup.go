@@ -99,11 +99,23 @@ func primaryKeySQL(engineName, schema, table string) string {
 			schemaSQL = importLiteral(engineName, schema)
 		}
 		return "SELECT column_name FROM information_schema.key_column_usage WHERE constraint_name = 'PRIMARY' AND table_schema = " + schemaSQL + " AND table_name = " + importLiteral(engineName, table) + " ORDER BY ordinal_position"
+	case "sqlite":
+		return "SELECT name FROM pragma_table_info(" + importLiteral(engineName, table) + ") WHERE pk > 0 ORDER BY pk"
+	case "duckdb":
+		return "SELECT unnest(constraint_column_names) FROM duckdb_constraints() WHERE constraint_type = 'PRIMARY KEY' AND table_name = " + importLiteral(engineName, table) + duckDBSchemaFilter(engineName, schema)
 	case "mssql", "sqlserver":
 		return "SELECT c.name FROM sys.indexes i JOIN sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id WHERE i.is_primary_key = 1 AND i.object_id = OBJECT_ID(" + importLiteral(engineName, qualifiedTable(engineName, schema, table)) + ") ORDER BY ic.key_ordinal"
 	default:
 		return "SELECT a.attname FROM pg_index i JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) WHERE i.indisprimary AND i.indrelid = to_regclass(" + importLiteral(engineName, qualifiedTable(engineName, schema, table)) + ") ORDER BY array_position(i.indkey::int2[], a.attnum)"
 	}
+}
+
+// duckDBSchemaFilter narrows a DuckDB catalog query to a schema.
+func duckDBSchemaFilter(engineName, schema string) string {
+	if schema == "" {
+		return ""
+	}
+	return " AND schema_name = " + importLiteral(engineName, schema)
 }
 
 // columnKindsSQL lists the columns a restore must treat specially: generated
@@ -117,6 +129,12 @@ func columnKindsSQL(engineName, schema, table string) string {
 			schemaSQL = importLiteral(engineName, schema)
 		}
 		return "SELECT column_name, 'generated' FROM information_schema.columns WHERE table_schema = " + schemaSQL + " AND table_name = " + importLiteral(engineName, table) + " AND extra IN ('STORED GENERATED', 'VIRTUAL GENERATED')"
+	case "sqlite":
+		return "SELECT name, 'generated' FROM pragma_table_xinfo(" + importLiteral(engineName, table) + ") WHERE hidden IN (2, 3)"
+	case "duckdb":
+		// DuckDB's catalog does not mark generated columns; they are virtual
+		// and refuse writes, so a restore touching one fails visibly.
+		return "SELECT NULL, NULL WHERE FALSE"
 	case "mssql", "sqlserver":
 		return "SELECT c.name, CASE WHEN c.is_computed = 1 OR t.name = 'timestamp' THEN 'generated' ELSE 'identity' END FROM sys.columns c JOIN sys.types t ON t.user_type_id = c.user_type_id WHERE c.object_id = OBJECT_ID(" + importLiteral(engineName, qualifiedTable(engineName, schema, table)) + ") AND (c.is_identity = 1 OR c.is_computed = 1 OR t.name = 'timestamp')"
 	default:
@@ -228,7 +246,7 @@ func restoreLiteral(engineName string, value backupValue) string {
 	case "null":
 		return "NULL"
 	case "bool":
-		if engineName == "postgres" {
+		if engineName == "postgres" || engineName == "duckdb" {
 			return strings.ToUpper(value.Value)
 		}
 		if value.Value == "true" {
@@ -243,6 +261,10 @@ func restoreLiteral(engineName string, value backupValue) string {
 			return "X'" + value.Value + "'"
 		case "mssql", "sqlserver":
 			return "0x" + value.Value
+		case "sqlite":
+			return "X'" + value.Value + "'"
+		case "duckdb":
+			return "unhex('" + value.Value + "')"
 		default:
 			return `'\x` + value.Value + `'::bytea`
 		}
@@ -660,6 +682,12 @@ func (s *Server) listRowBackups(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) rowBackupRestore(w http.ResponseWriter, r *http.Request) {
+	// The script holds values as stored, before any result hook; on a shared
+	// server only administrators may read it. Everyone can still restore.
+	if identity := identityFromContext(r.Context()); s.config.Shared && !identity.IsAdmin() {
+		writeError(w, http.StatusForbidden, "POLICY_DENIED", "only administrators can open a backup's script; use Restore instead")
+		return
+	}
 	item, err := s.store.RowBackup(r.Context(), r.PathValue("id"), identityFromContext(r.Context()).UserID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "NOT_FOUND", "row backup not found")

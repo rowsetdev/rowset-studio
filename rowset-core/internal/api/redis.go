@@ -18,8 +18,8 @@ func (s *Server) redisScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	identity := identityFromContext(r.Context())
-	if connection.Engine != "redis" && connection.Engine != "valkey" || s.config.Shared || !identity.IsAdmin() {
-		writeError(w, 403, "UNSUPPORTED", "key browsing is available to personal workspace administrators only")
+	if connection.Engine != "redis" && connection.Engine != "valkey" {
+		writeError(w, 400, "UNSUPPORTED", "this connection is not a Redis or Valkey connection")
 		return
 	}
 	var input engine.RedisScanInput
@@ -87,8 +87,8 @@ func (s *Server) redisWrite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	identity := identityFromContext(r.Context())
-	if connection.Engine != "redis" && connection.Engine != "valkey" || s.config.Shared || !identity.IsAdmin() {
-		writeError(w, 403, "UNSUPPORTED", "key writes are available to personal workspace administrators only")
+	if connection.Engine != "redis" && connection.Engine != "valkey" {
+		writeError(w, 400, "UNSUPPORTED", "this connection is not a Redis or Valkey connection")
 		return
 	}
 	var input struct {
@@ -142,9 +142,8 @@ func (s *Server) redisBulkWrite(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	identity := identityFromContext(r.Context())
-	if connection.Engine != "redis" && connection.Engine != "valkey" || s.config.Shared || !identity.IsAdmin() {
-		writeError(w, 403, "UNSUPPORTED", "key writes are available to personal workspace administrators only")
+	if connection.Engine != "redis" && connection.Engine != "valkey" {
+		writeError(w, 400, "UNSUPPORTED", "this connection is not a Redis or Valkey connection")
 		return
 	}
 	var input engine.RedisBulkWriteInput
@@ -189,8 +188,8 @@ func (s *Server) redisDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	identity := identityFromContext(r.Context())
-	if connection.Engine != "redis" && connection.Engine != "valkey" || s.config.Shared || !identity.IsAdmin() {
-		writeError(w, 403, "UNSUPPORTED", "key writes are available to personal workspace administrators only")
+	if connection.Engine != "redis" && connection.Engine != "valkey" {
+		writeError(w, 400, "UNSUPPORTED", "this connection is not a Redis or Valkey connection")
 		return
 	}
 	var input struct {

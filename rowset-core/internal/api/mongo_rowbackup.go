@@ -70,7 +70,7 @@ func (s *Server) mongoFinishBackupCapture(identity domain.Identity, connection d
 // Personal workspaces only, same as SQL row backups: a restore would bypass
 // a shared server's result hooks.
 func (s *Server) mongoCaptureBackup(ctx context.Context, identity domain.Identity, connection domain.Connection, target engine.Connection, database, collection, kind, statement string, filter json.RawMessage) Annotations {
-	if s.config.Shared || s.vault == nil {
+	if s.vault == nil {
 		return nil
 	}
 	docs, truncated, err := s.engines.MongoFind(ctx, target, engine.MongoFindInput{Collection: collection, Filter: filter, Limit: rowBackupLimit})
@@ -81,7 +81,7 @@ func (s *Server) mongoCaptureBackup(ctx context.Context, identity domain.Identit
 // transaction: the read runs through the transaction's own session, so it
 // sees exactly the state the write that follows it is about to change.
 func (s *Server) mongoCaptureTxnBackup(identity domain.Identity, connection domain.Connection, transaction *engine.MongoTransaction, database, collection, kind, statement string, filter json.RawMessage) Annotations {
-	if s.config.Shared || s.vault == nil {
+	if s.vault == nil {
 		return nil
 	}
 	docs, truncated, err := transaction.FindMany(engine.MongoFindInput{Collection: collection, Filter: filter, Limit: rowBackupLimit})

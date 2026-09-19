@@ -47,8 +47,11 @@ type Config struct {
 	QueryHistoryRetentionDays *uint32
 	// RetentionConfigured is true when either retention period was set
 	// explicitly. A personal workspace deletes nothing unless it was.
-	RetentionConfigured       bool
-	LogDir                    string
+	RetentionConfigured bool
+	LogDir              string
+	// ScheduleOutputDir holds the result files of scheduled queries on a
+	// shared server, one folder per user; empty means next to the database.
+	ScheduleOutputDir         string
 	SecureCookies             bool
 	RateLimitPerMinute        uint32
 	TopologyCheckIntervalSecs uint64
@@ -106,7 +109,7 @@ func FromEnvironment(defaultDBPath string) (Config, error) {
 		RequestBodyLimitBytes: int64Value("ROWSET_BODY_LIMIT_BYTES", 1_048_576),
 		AuditRetentionDays:    retention("ROWSET_AUDIT_RETENTION_DAYS", 90), QueryHistoryRetentionDays: retention("ROWSET_QUERY_HISTORY_RETENTION_DAYS", 30),
 		RetentionConfigured: strings.TrimSpace(os.Getenv("ROWSET_AUDIT_RETENTION_DAYS")) != "" || strings.TrimSpace(os.Getenv("ROWSET_QUERY_HISTORY_RETENTION_DAYS")) != "",
-		LogDir:              optional("ROWSET_LOG_DIR"), SecureCookies: boolValue("ROWSET_SECURE_COOKIES", env == Production),
+		LogDir:              optional("ROWSET_LOG_DIR"), ScheduleOutputDir: optional("ROWSET_SCHEDULE_OUTPUT_DIR"), SecureCookies: boolValue("ROWSET_SECURE_COOKIES", env == Production),
 		RateLimitPerMinute: uint32(uint64Value("ROWSET_RATE_LIMIT_PER_MINUTE", 120)), TopologyCheckIntervalSecs: uint64Value("ROWSET_TOPOLOGY_CHECK_INTERVAL_SECS", 30),
 		QueryStreamTimeoutSecs: uint64Value("ROWSET_QUERY_STREAM_TIMEOUT_SECS", 8*60),
 		PostgresPoolSize:       uint32(uint64Value("ROWSET_POSTGRES_POOL_SIZE", 10)), MySQLPoolSize: uint32(uint64Value("ROWSET_MYSQL_POOL_SIZE", 10)),

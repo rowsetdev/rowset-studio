@@ -19,8 +19,8 @@ func (s *Server) mongoFind(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	identity := identityFromContext(r.Context())
-	if connection.Engine != "mongodb" || s.config.Shared || !identity.IsAdmin() {
-		writeError(w, 403, "UNSUPPORTED", "document queries are available to personal workspace administrators only")
+	if connection.Engine != "mongodb" {
+		writeError(w, 400, "UNSUPPORTED", "this connection is not a MongoDB connection")
 		return
 	}
 	var input engine.MongoFindInput
@@ -96,8 +96,8 @@ func (s *Server) mongoAggregate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	identity := identityFromContext(r.Context())
-	if connection.Engine != "mongodb" || s.config.Shared || !identity.IsAdmin() {
-		writeError(w, 403, "UNSUPPORTED", "document queries are available to personal workspace administrators only")
+	if connection.Engine != "mongodb" {
+		writeError(w, 400, "UNSUPPORTED", "this connection is not a MongoDB connection")
 		return
 	}
 	var input engine.MongoAggregateInput
@@ -171,9 +171,8 @@ func (s *Server) mongoInsert(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	identity := identityFromContext(r.Context())
-	if connection.Engine != "mongodb" || s.config.Shared || !identity.IsAdmin() {
-		writeError(w, 403, "UNSUPPORTED", "document writes are available to personal workspace administrators only")
+	if connection.Engine != "mongodb" {
+		writeError(w, 400, "UNSUPPORTED", "this connection is not a MongoDB connection")
 		return
 	}
 	var input engine.MongoInsertInput
@@ -215,9 +214,8 @@ func (s *Server) mongoInsertMany(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	identity := identityFromContext(r.Context())
-	if connection.Engine != "mongodb" || s.config.Shared || !identity.IsAdmin() {
-		writeError(w, 403, "UNSUPPORTED", "document writes are available to personal workspace administrators only")
+	if connection.Engine != "mongodb" {
+		writeError(w, 400, "UNSUPPORTED", "this connection is not a MongoDB connection")
 		return
 	}
 	var input engine.MongoInsertManyInput
@@ -270,8 +268,8 @@ func (s *Server) mongoUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	identity := identityFromContext(r.Context())
-	if connection.Engine != "mongodb" || s.config.Shared || !identity.IsAdmin() {
-		writeError(w, 403, "UNSUPPORTED", "document writes are available to personal workspace administrators only")
+	if connection.Engine != "mongodb" {
+		writeError(w, 400, "UNSUPPORTED", "this connection is not a MongoDB connection")
 		return
 	}
 	var input struct {
@@ -332,8 +330,8 @@ func (s *Server) mongoDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	identity := identityFromContext(r.Context())
-	if connection.Engine != "mongodb" || s.config.Shared || !identity.IsAdmin() {
-		writeError(w, 403, "UNSUPPORTED", "document writes are available to personal workspace administrators only")
+	if connection.Engine != "mongodb" {
+		writeError(w, 400, "UNSUPPORTED", "this connection is not a MongoDB connection")
 		return
 	}
 	var input struct {

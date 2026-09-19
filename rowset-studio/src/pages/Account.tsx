@@ -39,7 +39,7 @@ export default function Account() {
         </dl>
       </Panel>
 
-      {!shared && <Panel className="p-4">
+      <Panel className="p-4">
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 className="text-[14px] font-semibold text-slate-900 dark:text-slate-100">Back up rows before UPDATE and DELETE</h2>
@@ -59,11 +59,11 @@ export default function Account() {
             <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${rowBackup ? "left-[18px]" : "left-0.5"}`} />
           </button>
         </div>
-      </Panel>}
+      </Panel>
 
-      {!shared && <AiSettingsPanel />}
+      <AiSettingsPanel />
 
-      {!shared && <SlackSettingsPanel />}
+      <SlackSettingsPanel />
 
       {sections.map((Section, index) => <Section key={index} />)}
     </div>

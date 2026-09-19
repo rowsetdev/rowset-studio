@@ -119,10 +119,6 @@ func (s *Server) createConnection(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if s.config.Shared && engine.AdditionalEngine(input.Engine) && input.Engine != "cassandra" {
-		writeError(w, 400, "BAD_REQUEST", "additional engines are currently available in personal workspaces only")
-		return
-	}
 	connection, nodes, message := normalizeConnectionInput(input, nil, identityFromContext(r.Context()).OrgID)
 	if message != "" {
 		writeError(w, http.StatusBadRequest, "BAD_REQUEST", message)
@@ -202,10 +198,6 @@ func (s *Server) updateConnection(w http.ResponseWriter, r *http.Request) {
 	var input connectionInput
 	body, ok := s.decodeConnectionInput(w, r, &input)
 	if !ok {
-		return
-	}
-	if s.config.Shared && engine.AdditionalEngine(input.Engine) && input.Engine != "cassandra" {
-		writeError(w, 400, "BAD_REQUEST", "additional engines are currently available in personal workspaces only")
 		return
 	}
 	connection, nodes, message := normalizeConnectionInput(input, &existing, identity.OrgID)
@@ -329,9 +321,6 @@ func (s *Server) engineConnection(r *http.Request, connection domain.Connection,
 }
 
 func (s *Server) engineConnectionAt(ctx context.Context, connection domain.Connection, database, host string, port int) (engine.Connection, error) {
-	if s.config.Shared && engine.AdditionalEngine(connection.Engine) && connection.Engine != "cassandra" {
-		return engine.Connection{}, fmt.Errorf("additional engines are currently available in personal workspaces only")
-	}
 	if engine.FileEngine(connection.Engine) && database != "" && database != connection.Database {
 		return engine.Connection{}, fmt.Errorf("a local connection can only open its configured database file")
 	}

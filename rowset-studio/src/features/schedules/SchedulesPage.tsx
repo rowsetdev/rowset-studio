@@ -4,7 +4,7 @@ import { useLocation, useNavigate } from "react-router";
 import { Button, Field, Input, PageHeader, Panel, Select, Textarea } from "../../components/ui";
 import { Icon } from "../../components/Icon";
 import { useConnections } from "../connections/useConnections";
-import { createSchedule, deleteSchedule, listRuns, listSchedules, runSchedule, scheduleDefaults, updateSchedule, type ScheduledInput, type ScheduledQuery } from "./api";
+import { createSchedule, deleteSchedule, downloadRunFile, listRuns, listSchedules, runSchedule, scheduleDefaults, updateSchedule, type ScheduledInput, type ScheduledQuery } from "./api";
 import { browserTimeZone, describeSchedule, type ScheduleSpec } from "./scheduleText";
 
 type Repeat = "daily" | "weekdays" | "days" | "interval";
@@ -202,7 +202,9 @@ export default function SchedulesPage() {
                 )}
 
                 <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_140px]">
-                  <Field label="Save results in folder"><Input value={draft.outputDir} onChange={(e) => patch({ outputDir: e.target.value })} className="font-mono text-[12px]" required /></Field>
+                  {defaults.data?.serverFolder
+                    ? <p className="text-[12px] text-slate-500 dark:text-slate-400">Results are kept on the server; download them from the runs below.</p>
+                    : <Field label="Save results in folder"><Input value={draft.outputDir} onChange={(e) => patch({ outputDir: e.target.value })} className="font-mono text-[12px]" required /></Field>}
                   <Field label="Format">
                     <Select value={draft.format} onChange={(e) => patch({ format: e.target.value as "csv" | "json" })}>
                       <option value="csv">CSV</option>
@@ -256,6 +258,7 @@ function StatusDot({ item }: { item: ScheduledQuery }) {
 }
 
 function Runs({ query }: { query: ScheduledQuery }) {
+  const serverFolder = Boolean(useQuery({ queryKey: ["schedule-defaults"], queryFn: scheduleDefaults }).data?.serverFolder);
   const runs = useQuery({ queryKey: ["schedule-runs", query.id, query.lastRun?.id, query.running], queryFn: () => listRuns(query.id) });
   return (
     <Panel className="overflow-hidden">
@@ -279,7 +282,9 @@ function Runs({ query }: { query: ScheduledQuery }) {
                   <td className={`px-3 py-2 font-medium ${run.status === "error" ? "text-rose-600 dark:text-rose-400" : run.status === "running" ? "text-sky-600" : "text-emerald-600 dark:text-emerald-400"}`}>{run.status}</td>
                   <td className="px-3 py-2 tabular-nums">{run.status === "running" ? "—" : run.rows}</td>
                   <td className="max-w-[520px] px-3 py-2">
-                    {run.outputPath && <PathCell path={run.outputPath} />}
+                    {run.outputPath && (serverFolder
+                      ? <button type="button" onClick={() => void downloadRunFile(query.id, run)} className="inline-flex items-center gap-1 text-brand-700 hover:underline dark:text-brand-300"><Icon name="download" size={12} />Download</button>
+                      : <PathCell path={run.outputPath} />)}
                     {run.error && <span className="text-rose-600 dark:text-rose-400">{run.error}</span>}
                   </td>
                 </tr>

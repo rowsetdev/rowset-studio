@@ -1,4 +1,4 @@
-import { api } from "../../lib/api";
+import { api, apiResponse } from "../../lib/api";
 import type { ScheduleSpec } from "./scheduleText";
 
 export interface ScheduledRun {
@@ -37,7 +37,18 @@ export function listSchedules() {
 }
 
 export function scheduleDefaults() {
-  return api<{ outputDir: string }>("/scheduled-queries/defaults");
+  return api<{ outputDir: string; serverFolder?: boolean }>("/scheduled-queries/defaults");
+}
+
+/** Downloads the result file of a run (a server keeps it in its own folder). */
+export async function downloadRunFile(queryId: string, run: ScheduledRun) {
+  const response = await apiResponse(`/scheduled-queries/${queryId}/runs/${run.id}/file`);
+  const url = URL.createObjectURL(await response.blob());
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = (run.outputPath ?? "result").split(/[\\/]/).pop() ?? "result";
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 export function createSchedule(input: ScheduledInput) {

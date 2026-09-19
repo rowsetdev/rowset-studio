@@ -37,7 +37,7 @@ type redisRowBackupPayload struct {
 // this only skips when the key can't be read, or (for a delete) when there
 // was nothing there to delete in the first place.
 func (s *Server) redisCaptureBackup(ctx context.Context, identity domain.Identity, connection domain.Connection, target engine.Connection, database, key, kind, statement string) Annotations {
-	if s.config.Shared || s.vault == nil {
+	if s.vault == nil {
 		return nil
 	}
 	snapshot, err := s.engines.RedisSnapshotKey(ctx, target, key)

@@ -46,7 +46,8 @@ export type IconName =
   | "more"
   | "notebook"
   | "bookmark"
-  | "braces";
+  | "braces"
+  | "download";
 
 const paths: Record<IconName, ReactNode> = {
   "chevron-right": <path d="M6 4l4 4-4 4" />,
@@ -163,6 +164,12 @@ const paths: Record<IconName, ReactNode> = {
     <>
       <circle cx="7" cy="7" r="4" />
       <path d="M10 10l3 3" />
+    </>
+  ),
+  download: (
+    <>
+      <path d="M8 2.5v8M4.5 7L8 10.5 11.5 7" />
+      <path d="M3 13.5h10" />
     </>
   ),
   upload: (

@@ -76,6 +76,16 @@ const personalGroups: NavGroup[] = [
   ] },
 ];
 
+// On a shared server the same pages, named for several users.
+const sharedGroups: NavGroup[] = [
+  { ...personalGroups[0], title: "Workspace" },
+  personalGroups[1],
+  { title: "Settings", items: [
+    { to: "/policies", label: "Policies", icon: "shield", adminOnly: true },
+    { to: "/account", label: "Account", icon: "key" },
+  ] },
+];
+
 const appVersion = import.meta.env.VITE_ROWSET_VERSION || "dev";
 const vendor = import.meta.env.VITE_ROWSET_VENDOR ?? "";
 const commandPaletteShortcut = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⇧⌘K" : "Ctrl+Shift+K";
@@ -87,7 +97,9 @@ function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => 
   const shared = useShared();
   // The desktop app signs in by itself, so it has nothing to sign out of.
   const desktop = Boolean(useInstance().data?.desktop);
-  const groups: NavGroup[] = shared && extensionGroups.length ? extensionGroups : personalGroups;
+  // Extensions add groups before Settings; everything Studio has stays.
+  const base = shared ? sharedGroups : personalGroups;
+  const groups: NavGroup[] = [...base.slice(0, -1), ...extensionGroups, base[base.length - 1]];
   const user = useAuth((s) => s.user);
   const logout = useAuth((s) => s.logout);
   const navigate = useNavigate();

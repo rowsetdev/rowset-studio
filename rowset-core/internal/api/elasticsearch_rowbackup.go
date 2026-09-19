@@ -35,7 +35,7 @@ type elasticsearchRowBackupPayload struct {
 // error) when the document doesn't exist yet — an update/delete on a
 // missing id fails on its own before this would ever be applied.
 func (s *Server) elasticsearchCaptureBackup(ctx context.Context, identity domain.Identity, connection domain.Connection, target engine.Connection, database, index, docID, kind, statement string) Annotations {
-	if s.config.Shared || s.vault == nil {
+	if s.vault == nil {
 		return nil
 	}
 	source, exists, err := s.engines.ElasticsearchGet(ctx, target, index, docID)

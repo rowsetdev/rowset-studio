@@ -6,7 +6,6 @@ import { Icon } from "../../components/Icon";
 import EngineLogo from "../../components/EngineLogo";
 import { useConnections } from "../connections/useConnections";
 import { listMyHistory, type HistoryItem } from "../editor/api";
-import { useShared } from "../../lib/instance";
 import RowBackups from "./RowBackups";
 
 const RANGES = { "24h": 24 * 60 * 60 * 1000, "7d": 7 * 24 * 60 * 60 * 1000, "30d": 30 * 24 * 60 * 60 * 1000 } as const;
@@ -21,7 +20,6 @@ export default function ActivityPage() {
   const [search, setSearch] = useState("");
   const [view, setView] = useState<"statements" | "backups">("statements");
   const [page, setPage] = useState(0);
-  const shared = useShared();
   const navigate = useNavigate();
   const { data: connections = [] } = useConnections();
   const history = useQuery({
@@ -52,7 +50,7 @@ export default function ActivityPage() {
           </button>
         }
       />
-      {!shared && <SegTabs tabs={[{ value: "statements", label: "Statements", icon: "activity" }, { value: "backups", label: "Row backups", icon: "history" }]} value={view} onChange={setView} />}
+      <SegTabs tabs={[{ value: "statements", label: "Statements", icon: "activity" }, { value: "backups", label: "Row backups", icon: "history" }]} value={view} onChange={setView} />
       {view === "backups" ? (
         <>
           <Panel className="flex items-center gap-2 p-2.5">

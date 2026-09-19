@@ -17,8 +17,8 @@ func (s *Server) elasticsearchSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	identity := identityFromContext(r.Context())
-	if connection.Engine != "elasticsearch" || s.config.Shared || !identity.IsAdmin() {
-		writeError(w, 403, "UNSUPPORTED", "index search is available to personal workspace administrators only")
+	if connection.Engine != "elasticsearch" {
+		writeError(w, 400, "UNSUPPORTED", "this connection is not an Elasticsearch connection")
 		return
 	}
 	var input engine.ElasticsearchSearchInput
@@ -87,9 +87,8 @@ func (s *Server) elasticsearchIndex(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	identity := identityFromContext(r.Context())
-	if connection.Engine != "elasticsearch" || s.config.Shared || !identity.IsAdmin() {
-		writeError(w, 403, "UNSUPPORTED", "document writes are available to personal workspace administrators only")
+	if connection.Engine != "elasticsearch" {
+		writeError(w, 400, "UNSUPPORTED", "this connection is not an Elasticsearch connection")
 		return
 	}
 	var input engine.ElasticsearchIndexInput
@@ -133,9 +132,8 @@ func (s *Server) elasticsearchBulkIndex(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	identity := identityFromContext(r.Context())
-	if connection.Engine != "elasticsearch" || s.config.Shared || !identity.IsAdmin() {
-		writeError(w, 403, "UNSUPPORTED", "document writes are available to personal workspace administrators only")
+	if connection.Engine != "elasticsearch" {
+		writeError(w, 400, "UNSUPPORTED", "this connection is not an Elasticsearch connection")
 		return
 	}
 	var input engine.ElasticsearchBulkIndexInput
@@ -184,8 +182,8 @@ func (s *Server) elasticsearchUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	identity := identityFromContext(r.Context())
-	if connection.Engine != "elasticsearch" || s.config.Shared || !identity.IsAdmin() {
-		writeError(w, 403, "UNSUPPORTED", "document writes are available to personal workspace administrators only")
+	if connection.Engine != "elasticsearch" {
+		writeError(w, 400, "UNSUPPORTED", "this connection is not an Elasticsearch connection")
 		return
 	}
 	var input struct {
@@ -235,8 +233,8 @@ func (s *Server) elasticsearchDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	identity := identityFromContext(r.Context())
-	if connection.Engine != "elasticsearch" || s.config.Shared || !identity.IsAdmin() {
-		writeError(w, 403, "UNSUPPORTED", "document writes are available to personal workspace administrators only")
+	if connection.Engine != "elasticsearch" {
+		writeError(w, 400, "UNSUPPORTED", "this connection is not an Elasticsearch connection")
 		return
 	}
 	var input struct {

@@ -2,6 +2,8 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router";
 import { api } from "../../lib/api";
+import { useAuth } from "../../lib/auth";
+import { useShared } from "../../lib/instance";
 import { Button, Modal, Panel } from "../../components/ui";
 import { Icon } from "../../components/Icon";
 import EngineLogo from "../../components/EngineLogo";
@@ -37,6 +39,11 @@ function deleteRowBackup(id: string) {
 
 // Rows saved before an UPDATE or DELETE, each with a script that puts them back.
 export default function RowBackups({ connections, search }: { connections: Connection[]; search: string }) {
+  // On a shared server a backup script shows stored values, so only
+  // administrators open it; everyone can restore.
+  const shared = useShared();
+  const role = useAuth((s) => s.user?.role);
+  const canOpenScript = !shared || role === "admin";
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [removing, setRemoving] = useState<RowBackup | null>(null);
@@ -119,9 +126,9 @@ export default function RowBackups({ connections, search }: { connections: Conne
                         <button type="button" disabled={!connection} onClick={() => { setError(""); setRestored(""); setRestoring(item); }} title={connection ? "Put these rows back now, in one transaction" : "The connection was removed"} className="inline-flex h-6 items-center gap-1 rounded border border-slate-200 bg-white px-2 text-[12px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800">
                           <Icon name="history" size={12} />Restore
                         </button>
-                        <button type="button" disabled={!connection || opening === item.id} onClick={() => void openRestore(item)} title={connection ? "Open the restore statements in a new editor tab to review or edit" : "The connection was removed"} className="inline-flex h-6 items-center gap-1 rounded px-2 text-[12px] text-slate-600 hover:bg-slate-200 hover:text-slate-900 disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800">
+                        {canOpenScript && <button type="button" disabled={!connection || opening === item.id} onClick={() => void openRestore(item)} title={connection ? "Open the restore statements in a new editor tab to review or edit" : "The connection was removed"} className="inline-flex h-6 items-center gap-1 rounded px-2 text-[12px] text-slate-600 hover:bg-slate-200 hover:text-slate-900 disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800">
                           <Icon name="sql" size={12} />{opening === item.id ? "Opening…" : "Script"}
-                        </button>
+                        </button>}
                         <button type="button" onClick={() => setRemoving(item)} title="Delete backup" aria-label="Delete backup" className="grid h-6 w-6 place-items-center rounded text-slate-400 opacity-60 hover:bg-slate-200 hover:text-rose-600 group-hover:opacity-100 dark:hover:bg-slate-800">
                           <Icon name="close" size={12} />
                         </button>

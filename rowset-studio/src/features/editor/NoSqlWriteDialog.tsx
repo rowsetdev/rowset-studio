@@ -2,7 +2,6 @@ import { useState } from "react";
 import { mongoInsert, mongoInsertMany, mongoUpdate, mongoDelete, mongoTxnInsert, mongoTxnUpdate, mongoTxnDelete, redisWrite, redisBulkWrite, redisDelete, elasticsearchIndex, elasticsearchBulkIndex, elasticsearchUpdate, elasticsearchDelete, type BackupNote } from "./api";
 import { ApiError } from "../../lib/api";
 import { rowBackupEnabled } from "../../lib/preferences";
-import { useShared } from "../../lib/instance";
 
 function backupSuffix(response: { backup?: BackupNote; backupSkipped?: string }): string {
   if (response.backup) return ` Backed up ${response.backup.rows} document(s) first; restore from Activity → Row backups.`;
@@ -57,12 +56,11 @@ export default function NoSqlWriteDialog({ connectionId, engine, database, txnId
 
   // Redis/Valkey's own bulk mode: a JSON array of writes, run as one pipeline.
   const [bulkWrites, setBulkWrites] = useState('[\n  { "key": "", "type": "string", "value": "" }\n]');
-  const shared = useShared();
-  const backup = mode !== "insert" && !shared && rowBackupEnabled();
+  const backup = mode !== "insert" && rowBackupEnabled();
   // Redis has no distinct update mode — "Set" (mode "insert") can overwrite
   // an existing key just as easily as create one — so unlike Mongo/ES it
   // isn't excluded from backup.
-  const redisBackup = !shared && rowBackupEnabled();
+  const redisBackup = rowBackupEnabled();
 
   async function run() {
     setBusy(true);
