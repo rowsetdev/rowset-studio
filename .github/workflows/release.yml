@@ -146,3 +146,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "$GITHUB_REF_NAME" release/* --title "Rowset Studio ${GITHUB_REF_NAME#v}" --notes-file release-notes.md
+      - name: Tag the Go module
+        # Go resolves github.com/rowsetdev/rowset-studio/rowset-core@vX.Y.Z
+        # through a tag named after the module's directory.
+        run: |
+          git tag "rowset-core/$GITHUB_REF_NAME" "$GITHUB_SHA"
+          git push origin "rowset-core/$GITHUB_REF_NAME"
