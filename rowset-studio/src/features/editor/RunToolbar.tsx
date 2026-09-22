@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Dropdown } from "../../components/Dropdown";
 import { Icon } from "../../components/Icon";
+import { dismissesMenu } from "../../components/menuDismiss";
 import { useConnections } from "../connections/useConnections";
 import type { Connection } from "../connections/api";
 import { listDatabases } from "./api";
@@ -326,11 +327,12 @@ function useMenuPortalStyle(open: boolean, container: React.RefObject<HTMLDivEle
 function MoreMenu({ items }: { items: { label: string; hint?: string; disabled?: boolean; checked?: boolean; onSelect: () => void }[] }) {
   const [open, setOpen] = useState(false);
   const container = useRef<HTMLDivElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
   const menuStyle = useMenuPortalStyle(open, container, 240);
   useEffect(() => {
     if (!open) return;
     const close = (event: MouseEvent | KeyboardEvent) => {
-      if (event instanceof KeyboardEvent ? event.key === "Escape" : !container.current?.contains(event.target as Node)) setOpen(false);
+      if (event instanceof KeyboardEvent ? event.key === "Escape" : dismissesMenu(event.target as Node, [container.current, menu.current])) setOpen(false);
     };
     document.addEventListener("mousedown", close);
     document.addEventListener("keydown", close);
@@ -342,7 +344,7 @@ function MoreMenu({ items }: { items: { label: string; hint?: string; disabled?:
         <Icon name="more" size={14} />
       </button>
       {open && createPortal(
-        <div role="menu" style={menuStyle} className="z-30 rounded-md border border-slate-200 bg-white py-1 text-[12px] shadow-lg dark:border-slate-800 dark:bg-slate-900">
+        <div ref={menu} role="menu" style={menuStyle} className="z-30 rounded-md border border-slate-200 bg-white py-1 text-[12px] shadow-lg dark:border-slate-800 dark:bg-slate-900">
           {items.map(item => (
             <button key={item.label} role={item.checked === undefined ? "menuitem" : "menuitemcheckbox"} aria-checked={item.checked} type="button" disabled={item.disabled} onClick={() => { setOpen(false); item.onSelect(); }} className="flex w-full items-start gap-2 px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-800">
               <span className="min-w-0 flex-1">
@@ -372,11 +374,12 @@ const AUTO_REFRESH_OPTIONS = [
 function AutoRefreshMenu({ ms, onChange, disabled, disabledReason }: { ms: number; onChange: (ms: number) => void; disabled: boolean; disabledReason: string }) {
   const [open, setOpen] = useState(false);
   const container = useRef<HTMLDivElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
   const menuStyle = useMenuPortalStyle(open, container, 160);
   useEffect(() => {
     if (!open) return;
     const close = (event: MouseEvent | KeyboardEvent) => {
-      if (event instanceof KeyboardEvent ? event.key === "Escape" : !container.current?.contains(event.target as Node)) setOpen(false);
+      if (event instanceof KeyboardEvent ? event.key === "Escape" : dismissesMenu(event.target as Node, [container.current, menu.current])) setOpen(false);
     };
     document.addEventListener("mousedown", close);
     document.addEventListener("keydown", close);
@@ -409,7 +412,7 @@ function AutoRefreshMenu({ ms, onChange, disabled, disabledReason }: { ms: numbe
         {active && <span>{ms / 1000}s</span>}
       </button>
       {open && createPortal(
-        <div role="menu" style={menuStyle} className="z-30 rounded-md border border-slate-200 bg-white py-1 text-[12px] shadow-lg dark:border-slate-800 dark:bg-slate-900">
+        <div ref={menu} role="menu" style={menuStyle} className="z-30 rounded-md border border-slate-200 bg-white py-1 text-[12px] shadow-lg dark:border-slate-800 dark:bg-slate-900">
           {AUTO_REFRESH_OPTIONS.map((option) => (
             <button key={option.ms} role="menuitemradio" aria-checked={ms === option.ms} type="button" onClick={() => { setOpen(false); onChange(option.ms); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800">
               <Icon name="check" size={13} className={`shrink-0 ${ms === option.ms ? "text-amber-600 dark:text-amber-400" : "invisible"}`} />

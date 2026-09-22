@@ -5,6 +5,13 @@ and `scripts/package-macos.sh` stamp it into Studio (sidebar), the `rowset`
 executable and the macOS app. Every change set bumps the patch version and adds
 an entry here; after x.y.99 the next version is x.(y+1).0.
 
+## 0.1.2 — 2026-09-22
+
+- Fixed: the editor's auto-refresh and "more" menus did nothing when an item
+  was clicked. Both menus render through a portal, so the click-outside check
+  matched their own items: the menu closed on mousedown and the item never
+  received the click.
+
 ## 0.1.1 — 2026-09-19
 
 - Changed: a shared installation now has everything a personal workspace

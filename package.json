@@ -1,7 +1,7 @@
 {
   "name": "@rowsetdev/studio",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Rowset Studio as a package: mountStudio and the building blocks of Studio extensions.",
   "type": "module",
   "exports": {
