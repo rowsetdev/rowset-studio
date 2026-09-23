@@ -11,6 +11,12 @@ an entry here; after x.y.99 the next version is x.(y+1).0.
   cannot classify". `DECLARE` (a variable, a table variable or a cursor),
   `PRINT`, `OPEN`, `CLOSE` and `DEALLOCATE` are session statements, and
   `FETCH` is a read, so row limits and masking apply to its rows.
+- Fixed: `EXPLAIN ANALYZE` runs the statement it explains on PostgreSQL, so
+  `EXPLAIN ANALYZE DELETE FROM orders` now counts as a DELETE instead of a
+  read. Plain `EXPLAIN` still only plans.
+- Fixed: `SET GLOBAL` and `SET PERSIST` change the server for everyone - one
+  of them switches the audit log off - and now count as administration
+  instead of session state. `SET SESSION` and plain `SET` are unchanged.
 - Fixed: MySQL executable comments hid whatever they carried. MySQL runs the
   SQL inside `/*! … */` and `/*!50100 … */`, so `SELECT 1 /*! ; DROP TABLE
   users */` reached the database as a second statement while Rowset saw a

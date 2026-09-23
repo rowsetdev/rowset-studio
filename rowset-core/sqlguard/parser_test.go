@@ -404,3 +404,43 @@ func TestKeywordsAreNotAliases(t *testing.T) {
 		}
 	}
 }
+
+// EXPLAIN ANALYZE runs the statement it explains on PostgreSQL, so it must
+// carry that statement's kind; plain EXPLAIN only plans.
+func TestExplainAnalyzeCarriesTheStatementItRuns(t *testing.T) {
+	for query, want := range map[string]Kind{
+		"EXPLAIN DELETE FROM users":                       Select,
+		"EXPLAIN ANALYZE DELETE FROM users":               Delete,
+		"EXPLAIN (ANALYZE, BUFFERS) UPDATE users SET a=1": Update,
+		"EXPLAIN ANALYZE SELECT * FROM users":             Select,
+		"EXPLAIN SELECT * FROM users":                     Select,
+	} {
+		info, err := ParseDialect(DialectPostgres, query)
+		if err != nil || info.Kind != want {
+			t.Fatalf("%q classified as %s, want %s (err=%v)", query, info.Kind, want, err)
+		}
+	}
+}
+
+// SET GLOBAL changes the server for everyone, including switching logging
+// off, so it is administration rather than session state.
+func TestServerWideSetIsAdministration(t *testing.T) {
+	for query, want := range map[string]Kind{
+		"SET GLOBAL general_log = OFF":     DDL,
+		"SET PERSIST max_connections = 10": DDL,
+		"SET SESSION sql_mode = ''":        Session,
+		"SET autocommit = 1":               Session,
+	} {
+		info, err := ParseDialect(DialectMySQL, query)
+		if err != nil || info.Kind != want {
+			t.Fatalf("%q classified as %s, want %s (err=%v)", query, info.Kind, want, err)
+		}
+	}
+}
+
+func TestOnDuplicateKeyUpdateNamesNoSecondTable(t *testing.T) {
+	info, err := ParseDialect(DialectMySQL, "INSERT INTO orders VALUES (1) ON DUPLICATE KEY UPDATE total = 1")
+	if err != nil || info.Kind != Insert || len(info.Tables) != 1 || info.Tables[0].Name != "orders" {
+		t.Fatalf("kind=%s tables=%v (err=%v)", info.Kind, info.Tables, err)
+	}
+}

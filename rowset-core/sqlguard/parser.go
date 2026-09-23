@@ -145,10 +145,17 @@ func parseDialect(dialect Dialect, sql string) (Info, error) {
 	info := Info{Dialect: dialect, Raw: raw, Tokens: tokens}
 	first := tokens[0].Lower
 	switch first {
-	case "select", "values", "table", "show", "explain", "describe", "desc", "pragma", "fetch":
+	case "select", "values", "table", "show", "describe", "desc", "pragma", "fetch":
 		// FETCH reads the next rows of an open cursor, so it is a read like
 		// any other: row limits and masking apply to what it returns.
 		info.Kind = Select
+	case "explain":
+		// PostgreSQL's EXPLAIN ANALYZE runs the statement it explains, so
+		// EXPLAIN ANALYZE DELETE really deletes. Plain EXPLAIN only plans.
+		info.Kind = Select
+		if explainRuns(tokens) {
+			classifyBlock(&info)
+		}
 	case "with":
 		info.Kind, info.Command = classifyWith(tokens)
 	case "insert", "replace", "upsert":
@@ -167,7 +174,15 @@ func parseDialect(dialect Dialect, sql string) (Info, error) {
 		// inside it. A block that wraps nothing - BEGIN TRANSACTION, IF with
 		// only an assignment - stays session control.
 		classifyBlock(&info)
-	case "set", "use", "start", "commit", "rollback", "savepoint", "release", "discard",
+	case "set":
+		// SET GLOBAL and SET PERSIST change the server for everyone - one of
+		// them turns the audit log off - so they are administration, not
+		// session state.
+		info.Kind = Session
+		if next := nextLower(tokens, 0); next == "global" || next == "persist" || next == "persist_only" {
+			info.Kind = DDL
+		}
+	case "use", "start", "commit", "rollback", "savepoint", "release", "discard",
 		// Local to the session and changing no data: a variable, table
 		// variable or cursor declaration, a message, the rest of the cursor
 		// verbs, control flow that wraps nothing, and the batch separator.
@@ -478,6 +493,17 @@ func classifyWith(tokens []Token) (Kind, Kind) {
 		risk = command
 	}
 	return risk, command
+}
+
+// explainRuns reports whether an EXPLAIN executes the statement it explains,
+// which it does once ANALYZE is asked for.
+func explainRuns(tokens []Token) bool {
+	for _, token := range tokens[1:] {
+		if token.keyword("analyze") || token.keyword("analyse") {
+			return true
+		}
+	}
+	return false
 }
 
 // classifyBlock gives a T-SQL block or control-flow statement the kind of the
@@ -881,6 +907,11 @@ func extractTables(tokens []Token) []TableRef {
 		// first word names a table too.
 		isTable := keyword == "from" || keyword == "join" || keyword == "update" || keyword == "into" || keyword == "truncate" || (i == 0 && keyword == "table")
 		if keyword == "delete" && i+1 < len(tokens) && tokens[i+1].Lower == "from" {
+			continue
+		}
+		// ON DUPLICATE KEY UPDATE assigns columns of the row being inserted;
+		// it names no second table.
+		if keyword == "update" && i > 0 && tokens[i-1].keyword("key") {
 			continue
 		}
 		// INTO OUTFILE and INTO DUMPFILE name a file, not a table.
