@@ -211,3 +211,51 @@ func TestHashCommentIsDialectAware(t *testing.T) {
 		t.Fatal("engine to dialect mapping is wrong")
 	}
 }
+
+// A T-SQL diagnostics script: a table variable is declared, filled from
+// constants and joined against the catalog. None of it changes data, so none
+// of it may be blocked as unclassifiable.
+func TestTSQLDiagnosticsScriptIsClassified(t *testing.T) {
+	declare, err := ParseDialect("mssql", "DECLARE @Tables TABLE (SchemaName sysname, TableName sysname)")
+	if err != nil || declare.Kind != Session || IsWrite(declare.Kind) {
+		t.Fatalf("DECLARE classified as %s (write=%v, err=%v)", declare.Kind, IsWrite(declare.Kind), err)
+	}
+	fill, err := ParseDialect("mssql", "INSERT INTO @Tables VALUES ('dbo', 'Currency'), ('payment', 'Payment')")
+	if err != nil || fill.Kind != Session || fill.Command != Insert {
+		t.Fatalf("INSERT into a table variable classified as %s/%s (err=%v)", fill.Kind, fill.Command, err)
+	}
+	read, err := ParseDialect("mssql", "SELECT x.SchemaName, SUM(ps.row_count) AS Rows FROM @Tables x LEFT JOIN sys.dm_db_partition_stats ps ON ps.object_id = 1 GROUP BY x.SchemaName")
+	if err != nil || read.Kind != Select || len(read.Tables) != 1 || read.Tables[0].Name != "dm_db_partition_stats" {
+		t.Fatalf("the catalog read classified as %s tables=%v (err=%v)", read.Kind, read.Tables, err)
+	}
+}
+
+func TestATableVariableDoesNotHideARead(t *testing.T) {
+	// The write target is local, but customers is read, so the statement
+	// stays a write and keeps its table for masking and row filters.
+	info, err := ParseDialect("mssql", "INSERT INTO @rows SELECT id, email FROM customers WHERE id = 1")
+	if err != nil || info.Kind != Insert || len(info.Tables) != 1 || info.Tables[0].Name != "customers" {
+		t.Fatalf("classified as %s tables=%v (err=%v)", info.Kind, info.Tables, err)
+	}
+	// A real table keeps its kind even when nothing is read.
+	plain, err := ParseDialect("mssql", "INSERT INTO audit_log VALUES (1, 'x')")
+	if err != nil || plain.Kind != Insert {
+		t.Fatalf("INSERT into a table classified as %s (err=%v)", plain.Kind, err)
+	}
+}
+
+func TestCursorVerbsAreClassified(t *testing.T) {
+	for query, want := range map[string]Kind{
+		"DECLARE reader CURSOR FOR SELECT id FROM orders": Session,
+		"OPEN reader":            Session,
+		"FETCH NEXT FROM reader": Select,
+		"CLOSE reader":           Session,
+		"DEALLOCATE reader":      Session,
+		"PRINT 'done'":           Session,
+	} {
+		info, err := Parse(query)
+		if err != nil || info.Kind != want {
+			t.Fatalf("%q classified as %s, want %s (err=%v)", query, info.Kind, want, err)
+		}
+	}
+}

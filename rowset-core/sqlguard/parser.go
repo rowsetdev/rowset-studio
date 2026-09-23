@@ -145,7 +145,9 @@ func parseDialect(dialect Dialect, sql string) (Info, error) {
 	info := Info{Dialect: dialect, Raw: raw, Tokens: tokens}
 	first := tokens[0].Lower
 	switch first {
-	case "select", "values", "table", "show", "explain", "describe", "desc", "pragma":
+	case "select", "values", "table", "show", "explain", "describe", "desc", "pragma", "fetch":
+		// FETCH reads the next rows of an open cursor, so it is a read like
+		// any other: row limits and masking apply to what it returns.
 		info.Kind = Select
 	case "with":
 		info.Kind, info.Command = classifyWith(tokens)
@@ -159,7 +161,11 @@ func parseDialect(dialect Dialect, sql string) (Info, error) {
 		info.Kind, info.IsDrop = DDL, true
 	case "truncate":
 		info.Kind, info.IsTruncate = DDL, true
-	case "set", "use", "begin", "start", "commit", "rollback", "savepoint", "release", "discard":
+	case "set", "use", "begin", "start", "commit", "rollback", "savepoint", "release", "discard",
+		// Local to the session and changing no data: a variable, table
+		// variable or cursor declaration, a message, and the rest of the
+		// cursor verbs. Scripts that gather diagnostics start with these.
+		"declare", "print", "open", "close", "deallocate":
 		info.Kind = Session
 	case "create", "alter", "rename", "comment", "grant", "revoke", "call", "copy", "execute", "exec", "vacuum", "analyze", "attach", "detach",
 		"do", "load", "bulk", "optimize", "system", "kill", "put", "get", "remove", "undrop", "refresh", "reindex", "cluster", "dbcc":
@@ -182,7 +188,32 @@ func parseDialect(dialect Dialect, sql string) (Info, error) {
 		info.HasWhere = false
 	}
 	info.Tables = extractTables(tokens)
+	if writesOnlyToATableVariable(info) {
+		info.Kind = Session
+	}
 	return info, nil
+}
+
+// writesOnlyToATableVariable reports a write whose target is a T-SQL table
+// variable and which reads no table: it changes nothing in the database, so
+// it is session state like any other local variable. A write that reads a
+// table (INSERT INTO @rows SELECT ... FROM customers) keeps its kind, so
+// masking and row filters still apply to what it reads.
+func writesOnlyToATableVariable(info Info) bool {
+	if len(info.Tables) > 0 || (info.Kind != Insert && info.Kind != Update && info.Kind != Delete) {
+		return false
+	}
+	target := ""
+	for index, token := range info.Tokens {
+		if index+1 >= len(info.Tokens) {
+			break
+		}
+		if token.Lower == "into" || token.Lower == "update" || (token.Lower == "from" && info.Kind == Delete) {
+			target = info.Tokens[index+1].Text
+			break
+		}
+	}
+	return strings.HasPrefix(target, "@")
 }
 
 func parseCacheIndex(key parseCacheKey) uint32 {

@@ -5,6 +5,17 @@ and `scripts/package-macos.sh` stamp it into Studio (sidebar), the `rowset`
 executable and the macOS app. Every change set bumps the patch version and adds
 an entry here; after x.y.99 the next version is x.(y+1).0.
 
+## 0.1.3 — 2026-09-23
+
+- Fixed: T-SQL scripts were blocked by "Block SQL statements the parser
+  cannot classify". `DECLARE` (a variable, a table variable or a cursor),
+  `PRINT`, `OPEN`, `CLOSE` and `DEALLOCATE` are session statements, and
+  `FETCH` is a read, so row limits and masking apply to its rows.
+- Changed: a write whose only target is a table variable and which reads no
+  table (`INSERT INTO @Tables VALUES …`) counts as session state, since it
+  changes nothing in the database; read-only roles may run it. A write that
+  reads a table keeps its kind, so masking and row filters still apply.
+
 ## 0.1.2 — 2026-09-22
 
 - Fixed: the editor's auto-refresh and "more" menus did nothing when an item
