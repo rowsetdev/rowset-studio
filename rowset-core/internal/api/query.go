@@ -128,6 +128,12 @@ func (s *Server) executeQuery(w http.ResponseWriter, r *http.Request, connection
 		return
 	}
 	info = prepared
+	// Rowset ran this without recognising its shape. Studio says so and
+	// offers to report it, so the parser can learn the statement instead of
+	// the person having to work around it.
+	if info.Kind == sqlguard.Other {
+		annotations["unclassified"] = true
+	}
 	// The statement runs exactly as written. A row cap stops the reading
 	// after that many rows instead of rewriting the SQL, so no statement
 	// becomes invalid and nothing is executed that the user did not write.

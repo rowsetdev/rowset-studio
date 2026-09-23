@@ -7,6 +7,16 @@ an entry here; after x.y.99 the next version is x.(y+1).0.
 
 ## 0.1.3 — 2026-09-23
 
+- Changed: a new workspace no longer blocks statements the parser has not
+  learned yet. The guardrails that matter on your own database - DROP,
+  TRUNCATE, and UPDATE or DELETE without a WHERE - are unchanged; "Block SQL
+  statements the parser cannot classify" now starts off and can be turned on
+  in My policies. A shared installation still starts with it on.
+- Added: a statement Rowset does not recognise is marked in the result
+  ("Not recognised") with a link that opens a prefilled issue, so the parser
+  can learn it instead of the statement being worked around. Nothing is sent
+  from Studio; the link only opens the form.
+
 - Fixed: T-SQL scripts were blocked by "Block SQL statements the parser
   cannot classify". `DECLARE` (a variable, a table variable or a cursor),
   `PRINT`, `OPEN`, `CLOSE` and `DEALLOCATE` are session statements, and

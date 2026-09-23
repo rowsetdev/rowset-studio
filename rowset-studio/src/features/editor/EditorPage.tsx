@@ -88,6 +88,15 @@ function editingFor(rowEditing: RowEditing | undefined, sourceSql: string | unde
 
 const IDLE_RUN: TabRunState = { status: "idle", message: "Ready", messageError: false };
 
+// Where a statement Rowset could not classify is reported. The link only
+// opens a prefilled issue form; nothing is sent from Studio, and the person
+// decides what of their SQL to paste.
+const UNRECOGNISED_STATEMENT_ISSUE =
+  "https://github.com/rowsetdev/rowset-studio/issues/new?labels=parser&title=" +
+  encodeURIComponent("Statement not recognised by the parser") +
+  "&body=" +
+  encodeURIComponent("Engine and version:\n\nStatement (remove anything private):\n\n```sql\n\n```\n\nWhat it should be treated as (read, write, session, administration):\n");
+
 // Auto-refresh is a client-side convenience gate, not a security boundary
 // (guardrail policies still run on every request either way) - it just
 // keeps the option from quietly turning a write into a recurring one. Mongo,
@@ -1396,6 +1405,7 @@ function StatusBar({ run, onExportAllRows, filteredCount }: { run: TabRunState; 
   const studioLabel = elapsed ? `studio ${elapsed}` : "";
   const rawNode = result?.annotations?.node;
   const nodeAnnotation = isNodeAnnotation(rawNode) ? rawNode : null;
+  const unclassified = result?.annotations?.unclassified === true;
 
   return (
     <div className="flex h-9 items-center gap-2 border-t border-slate-200 bg-white px-3 text-[11px] text-slate-500 dark:border-slate-800 dark:bg-slate-950">
@@ -1415,6 +1425,29 @@ function StatusBar({ run, onExportAllRows, filteredCount }: { run: TabRunState; 
           >
             <Icon name="database" size={11} />
             {nodeAnnotation.host}
+          </span>
+        )}
+        {unclassified && (
+          // Rowset ran the statement but does not recognise its shape, so
+          // policies that depend on the shape could not judge it. Saying so
+          // beats silently pretending the statement was understood.
+          <span className="inline-flex min-w-0 items-center gap-2">
+            <span
+              className="inline-flex shrink-0 items-center gap-1 rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 font-medium text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300"
+              title="Rowset does not recognise this statement's shape. It ran unchanged, but rules that depend on the shape could not judge it."
+            >
+              <Icon name="shield" size={11} />
+              Not recognised
+            </span>
+            <a
+              href={UNRECOGNISED_STATEMENT_ISSUE}
+              target="_blank"
+              rel="noreferrer"
+              className="shrink-0 font-medium text-amber-800 hover:underline dark:text-amber-300"
+              title="Report the statement so a later release recognises it"
+            >
+              Report it
+            </a>
           </span>
         )}
         {result && result.policyNotice && (

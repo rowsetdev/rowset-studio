@@ -256,3 +256,47 @@ func TestRevisedMigrationTextKeepsExistingDatabases(t *testing.T) {
 		t.Fatalf("checksum not moved to the current text: %q %v", checksum, err)
 	}
 }
+
+// The guardrails a new workspace starts with: DROP and TRUNCATE are blocked,
+// and statements the parser has not learned yet are not, so valid SQL keeps
+// running on someone's own database. A shared installation turns that one on
+// while it bootstraps.
+func TestNewWorkspaceStartsWithTheGuardrailsThatMatter(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, filepath.Join(t.TempDir(), "personal.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := store.CreateOrganization(ctx, domain.Organization{ID: "org-personal", Name: "Personal", CreatedAt: NowString()}); err != nil {
+		t.Fatal(err)
+	}
+	overrides, err := store.ListPolicyOverrides(ctx, "org-personal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := map[string]bool{}
+	for _, override := range overrides {
+		state[override.Key] = override.Enabled
+	}
+	if state["deny_unclassified"] {
+		t.Fatal("a new workspace blocks statements the parser has not learned yet")
+	}
+	if !state["deny_drop"] || !state["deny_truncate"] || !state["deny_delete_without_where"] {
+		t.Fatalf("a new workspace lost a guardrail: %v", state)
+	}
+
+	// Turning it on is one call, which is what a shared installation does.
+	if err := store.SetPolicyOverride(ctx, "policy-1", "org-personal", "deny_unclassified", true, nil); err != nil {
+		t.Fatal(err)
+	}
+	overrides, err = store.ListPolicyOverrides(ctx, "org-personal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, override := range overrides {
+		if override.Key == "deny_unclassified" && !override.Enabled {
+			t.Fatal("the guardrail could not be turned on")
+		}
+	}
+}

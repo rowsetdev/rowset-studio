@@ -517,7 +517,12 @@ var defaultPolicies = []DefaultPolicy{
 	{Key: "deny_update_without_where", Enabled: true},
 	{Key: "deny_drop", Enabled: true},
 	{Key: "deny_truncate", Enabled: true},
-	{Key: "deny_unclassified", Enabled: true},
+	// A workspace starts with the guardrails that matter on someone's own
+	// database: DROP and TRUNCATE. Blocking every statement the parser has
+	// not learned yet would stop valid SQL, so it starts off and is offered
+	// in My policies. An installation that serves several people turns it on
+	// when it bootstraps.
+	{Key: "deny_unclassified", Enabled: false},
 	{Key: "limit_rows", Config: "10000", Enabled: true},
 }
 

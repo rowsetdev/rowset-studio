@@ -29,7 +29,7 @@ var policyCatalog = []policyDefinition{
 	{"deny_truncate", "Block TRUNCATE statements", "high", "Blocks full-table TRUNCATE operations.", false, true, false},
 	{"limit_rows", "Limit how many rows a result returns", "low", "Rowset stops reading after this many rows and cancels the rest; your statement is never changed. New workspaces cap results at 10,000 rows.", true, true, false},
 	{"query_timeout_seconds", "Stop queries after a fixed number of seconds", "medium", "Applies the shortest of this policy, the saved connection timeout and the server stream timeout.", true, false, false},
-	{"deny_unclassified", "Block SQL statements the parser cannot classify", "high", "Fails closed on unusual SQL syntax.", false, false, false},
+	{"deny_unclassified", "Block SQL statements the parser cannot classify", "high", "Fails closed on syntax Rowset has not learned yet. A shared installation starts with this on; a personal workspace starts with it off and marks such statements in the result instead, so they can be reported and recognised in a later release.", false, false, false},
 }
 
 func policyKnown(key string) (policyDefinition, bool) {
