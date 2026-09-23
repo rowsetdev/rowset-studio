@@ -11,6 +11,24 @@ an entry here; after x.y.99 the next version is x.(y+1).0.
   cannot classify". `DECLARE` (a variable, a table variable or a cursor),
   `PRINT`, `OPEN`, `CLOSE` and `DEALLOCATE` are session statements, and
   `FETCH` is a read, so row limits and masking apply to its rows.
+- Fixed: MySQL executable comments hid whatever they carried. MySQL runs the
+  SQL inside `/*! … */` and `/*!50100 … */`, so `SELECT 1 /*! ; DROP TABLE
+  users */` reached the database as a second statement while Rowset saw a
+  comment. That text is now lexed as SQL on MySQL and MariaDB and still
+  ignored on the other engines.
+- Fixed: `SELECT … INTO` is a write. It creates a table on SQL Server and
+  PostgreSQL and writes a file on MySQL (`INTO OUTFILE`, `INTO DUMPFILE`), so
+  it no longer passes the rules as a read. `SELECT … INTO @variable` stays a
+  read, and an output file is no longer reported as a table.
+- Fixed: identifiers outside ASCII were split at the first non-ASCII byte, so
+  `müşteri` was read as a table called `m` and masking, row filters and
+  table-scoped policies never matched it.
+- Fixed: MySQL string and comment rules. A backslash escapes the next
+  character inside a string, and block comments do not nest, so `'\''` and
+  `/* /* */ DELETE …` are read the way MySQL reads them.
+- Fixed: PostgreSQL's `TABLE users` now names its table, and a keyword after
+  a table name (`SELECT * INTO archive FROM users`) is no longer taken as its
+  alias.
 - Fixed: a T-SQL block could hide a write. Statement splitting cuts on
   semicolons, so `BEGIN TRY DELETE FROM orders` or `IF EXISTS (…) DROP TABLE
   tmp` arrived as one statement and was read as session control; a block, IF

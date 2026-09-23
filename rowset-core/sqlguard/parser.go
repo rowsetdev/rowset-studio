@@ -206,7 +206,27 @@ func parseDialect(dialect Dialect, sql string) (Info, error) {
 	if writesOnlyToATableVariable(info) {
 		info.Kind = Session
 	}
+	if selectCreatesSomething(info) {
+		info.Kind, info.Command = DDL, DDL
+	}
 	return info, nil
+}
+
+// selectCreatesSomething reports a SELECT that writes instead of returning
+// rows: SELECT ... INTO new_table creates a table on SQL Server and
+// PostgreSQL, and SELECT ... INTO OUTFILE/DUMPFILE writes a file on MySQL.
+// SELECT ... INTO @variable only fills session state and stays a read.
+func selectCreatesSomething(info Info) bool {
+	if info.Kind != Select {
+		return false
+	}
+	for index, token := range info.Tokens {
+		if !token.keyword("into") || token.Depth != 0 || index+1 >= len(info.Tokens) {
+			continue
+		}
+		return !strings.HasPrefix(info.Tokens[index+1].Text, "@")
+	}
+	return false
 }
 
 // writesOnlyToATableVariable reports a write whose target is a T-SQL table
@@ -653,7 +673,7 @@ func Lex(sql string) ([]Token, error) {
 // LexDialect tokenizes sql using dialect's comment rules.
 func LexDialect(dialect Dialect, sql string) ([]Token, error) {
 	var out []Token
-	depth := 0
+	depth, executable := 0, 0
 	for i := 0; i < len(sql); {
 		if unicode.IsSpace(rune(sql[i])) {
 			i++
@@ -674,10 +694,21 @@ func LexDialect(dialect Dialect, sql string) ([]Token, error) {
 			continue
 		}
 		if i+1 < len(sql) && sql[i:i+2] == "/*" {
+			// MySQL runs what is inside /*! ... */ and /*!50100 ... */, so
+			// that text is SQL, not a comment: skip only the marker and keep
+			// lexing. Everything else in it is then seen by the rules.
+			if marker := executableCommentMarker(dialect, sql[i:]); marker > 0 {
+				i += marker
+				executable++
+				continue
+			}
 			commentDepth := 1
 			i += 2
 			for i < len(sql) && commentDepth > 0 {
-				if i+1 < len(sql) && sql[i:i+2] == "/*" {
+				// Only PostgreSQL and SQL Server nest block comments; on
+				// MySQL the first */ ends the comment and what follows is
+				// live SQL again.
+				if i+1 < len(sql) && sql[i:i+2] == "/*" && nestsComments(dialect) {
 					commentDepth++
 					i += 2
 				} else if i+1 < len(sql) && sql[i:i+2] == "*/" {
@@ -690,6 +721,12 @@ func LexDialect(dialect Dialect, sql string) ([]Token, error) {
 			if commentDepth != 0 {
 				return nil, fmt.Errorf("unterminated comment")
 			}
+			continue
+		}
+		// The end of an executable comment closes nothing in the statement.
+		if executable > 0 && i+1 < len(sql) && sql[i:i+2] == "*/" {
+			executable--
+			i += 2
 			continue
 		}
 		start := i
@@ -707,6 +744,12 @@ func LexDialect(dialect Dialect, sql string) ([]Token, error) {
 		if sql[i] == '\'' {
 			i++
 			for i < len(sql) {
+				// MySQL escapes with a backslash unless NO_BACKSLASH_ESCAPES
+				// is set, so '\'' is one string and not the start of another.
+				if sql[i] == '\\' && backslashEscapes(dialect) && i+1 < len(sql) {
+					i += 2
+					continue
+				}
 				if sql[i] == '\'' {
 					if i+1 < len(sql) && sql[i+1] == '\'' {
 						i += 2
@@ -778,6 +821,34 @@ func LexDialect(dialect Dialect, sql string) ([]Token, error) {
 	return out, nil
 }
 
+// executableCommentMarker returns the length of a MySQL executable comment
+// marker at the start of sql ("/*!" or "/*!50100"), or 0 when there is none.
+func executableCommentMarker(dialect Dialect, sql string) int {
+	if dialect != DialectMySQL && dialect != DialectGeneric {
+		return 0
+	}
+	if !strings.HasPrefix(sql, "/*!") {
+		return 0
+	}
+	length := 3
+	for length < len(sql) && sql[length] >= '0' && sql[length] <= '9' {
+		length++
+	}
+	return length
+}
+
+// nestsComments reports whether /* */ nests. PostgreSQL and SQL Server nest
+// them; MySQL does not.
+func nestsComments(dialect Dialect) bool {
+	return dialect != DialectMySQL
+}
+
+// backslashEscapes reports whether a backslash escapes the next character
+// inside a string literal, as it does on MySQL by default.
+func backslashEscapes(dialect Dialect) bool {
+	return dialect == DialectMySQL
+}
+
 func dollarQuoteDelimiter(sql string) (string, bool) {
 	if len(sql) < 2 || sql[0] != '$' {
 		return "", false
@@ -793,8 +864,12 @@ func dollarQuoteDelimiter(sql string) (string, bool) {
 	return "", false
 }
 
+// isIdent also accepts every non-ASCII byte, so an identifier written in
+// Turkish, Greek or Japanese stays one token. Splitting it would leave a
+// table called "m" for musteri and masking or row filters keyed by the real
+// name would never match it.
 func isIdent(ch byte) bool {
-	return ch == '_' || ch == '$' || ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || ch >= '0' && ch <= '9'
+	return ch == '_' || ch == '$' || ch >= 0x80 || ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || ch >= '0' && ch <= '9'
 }
 
 func extractTables(tokens []Token) []TableRef {
@@ -802,15 +877,21 @@ func extractTables(tokens []Token) []TableRef {
 	seen := map[string]bool{}
 	for i := 0; i < len(tokens); i++ {
 		keyword := tokens[i].Lower
-		isTable := keyword == "from" || keyword == "join" || keyword == "update" || keyword == "into" || keyword == "truncate"
+		// PostgreSQL's TABLE t is SELECT * FROM t, so the statement's own
+		// first word names a table too.
+		isTable := keyword == "from" || keyword == "join" || keyword == "update" || keyword == "into" || keyword == "truncate" || (i == 0 && keyword == "table")
 		if keyword == "delete" && i+1 < len(tokens) && tokens[i+1].Lower == "from" {
+			continue
+		}
+		// INTO OUTFILE and INTO DUMPFILE name a file, not a table.
+		if keyword == "into" && i+1 < len(tokens) && (tokens[i+1].keyword("outfile") || tokens[i+1].keyword("dumpfile")) {
 			continue
 		}
 		if !isTable {
 			continue
 		}
 		j := i + 1
-		if j < len(tokens) && tokens[j].Lower == "table" {
+		if j < len(tokens) && tokens[j].Lower == "table" && keyword != "table" {
 			j++
 		}
 		if j >= len(tokens) || tokens[j].Text == "(" || !tokens[j].Identifier {
@@ -841,4 +922,4 @@ func extractTables(tokens []Token) []TableRef {
 	return tables
 }
 
-var reserved = map[string]bool{"where": true, "join": true, "left": true, "right": true, "full": true, "inner": true, "outer": true, "cross": true, "on": true, "group": true, "order": true, "limit": true, "offset": true, "fetch": true, "returning": true, "union": true, "intersect": true, "except": true, "set": true, "values": true, "using": true, "with": true, "use": true, "force": true, "ignore": true, "window": true, "qualify": true, "for": true, "having": true}
+var reserved = map[string]bool{"from": true, "into": true, "outfile": true, "dumpfile": true, "where": true, "join": true, "left": true, "right": true, "full": true, "inner": true, "outer": true, "cross": true, "on": true, "group": true, "order": true, "limit": true, "offset": true, "fetch": true, "returning": true, "union": true, "intersect": true, "except": true, "set": true, "values": true, "using": true, "with": true, "use": true, "force": true, "ignore": true, "window": true, "qualify": true, "for": true, "having": true}

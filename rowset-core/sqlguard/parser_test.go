@@ -306,3 +306,101 @@ func TestPrepareStaysUnclassified(t *testing.T) {
 		t.Fatalf("PREPARE classified as %s (err=%v)", info.Kind, err)
 	}
 }
+
+// MySQL runs what is inside /*! ... */; every other engine ignores it. Read
+// as a comment it hides whatever it carries from every rule.
+func TestMySQLExecutableCommentsAreSQL(t *testing.T) {
+	hidden, err := ParseDialect(DialectMySQL, "SELECT 1 /*! ; DROP TABLE users */")
+	if err != nil || hidden.Kind != Multi {
+		t.Fatalf("a statement hidden in an executable comment classified as %s (err=%v)", hidden.Kind, err)
+	}
+	versioned, err := ParseDialect(DialectMySQL, "/*!40001 DELETE FROM users */")
+	if err != nil || versioned.Kind != Delete || len(versioned.Tables) != 1 || versioned.Tables[0].Name != "users" {
+		t.Fatalf("a versioned executable comment classified as %s tables=%v (err=%v)", versioned.Kind, versioned.Tables, err)
+	}
+	// PostgreSQL and SQL Server treat it as an ordinary comment.
+	plain, err := ParseDialect(DialectPostgres, "SELECT 1 /*! ; DROP TABLE users */")
+	if err != nil || plain.Kind != Select {
+		t.Fatalf("PostgreSQL read an executable comment as SQL: %s (err=%v)", plain.Kind, err)
+	}
+}
+
+func TestMySQLStringsAndCommentsFollowMySQLRules(t *testing.T) {
+	// A backslash escapes the quote, so this is one string, not the start of
+	// a second one.
+	escaped, err := ParseDialect(DialectMySQL, `SELECT '\'' , 1`)
+	if err != nil || escaped.Kind != Select {
+		t.Fatalf("an escaped quote classified as %s (err=%v)", escaped.Kind, err)
+	}
+	// MySQL does not nest block comments: the first */ ends this one.
+	nested, err := ParseDialect(DialectMySQL, "/* /* */ DELETE FROM users")
+	if err != nil || nested.Kind != Delete {
+		t.Fatalf("MySQL nested-comment handling classified as %s (err=%v)", nested.Kind, err)
+	}
+	// PostgreSQL does nest them, so the same text is one unterminated
+	// comment and fails closed.
+	if _, err := ParseDialect(DialectPostgres, "/* /* */ DELETE FROM users"); err == nil {
+		t.Fatal("PostgreSQL accepted an unterminated nested comment")
+	}
+}
+
+// SELECT ... INTO writes: a new table on SQL Server and PostgreSQL, a file on
+// MySQL. Only SELECT ... INTO @variable stays a read.
+func TestSelectIntoIsAWrite(t *testing.T) {
+	for dialect, query := range map[Dialect]string{
+		DialectMSSQL:    "SELECT * INTO archive_users FROM users",
+		DialectPostgres: "SELECT * INTO archive_users FROM users",
+		DialectMySQL:    "SELECT id FROM users INTO OUTFILE '/tmp/users.txt'",
+	} {
+		info, err := ParseDialect(dialect, query)
+		if err != nil || info.Kind != DDL || !IsWrite(info.Kind) {
+			t.Fatalf("%s: %q classified as %s (err=%v)", dialect, query, info.Kind, err)
+		}
+		for _, table := range info.Tables {
+			if table.Name == "outfile" || table.Name == "dumpfile" {
+				t.Fatalf("%q reported the output file as a table: %v", query, info.Tables)
+			}
+		}
+	}
+	variable, err := ParseDialect(DialectMSSQL, "SELECT @total = COUNT(*) INTO @rows FROM orders WHERE id = 1")
+	if err != nil || variable.Kind != Select {
+		t.Fatalf("SELECT INTO a variable classified as %s (err=%v)", variable.Kind, err)
+	}
+}
+
+// Masking and row filters match on the table name, so a name outside ASCII
+// has to survive lexing whole.
+func TestNonASCIIIdentifiersStayWhole(t *testing.T) {
+	info, err := ParseDialect(DialectPostgres, "SELECT ad FROM müşteri WHERE id = 1")
+	if err != nil || len(info.Tables) != 1 || info.Tables[0].Name != "müşteri" {
+		t.Fatalf("tables=%v (err=%v)", info.Tables, err)
+	}
+	quoted, err := ParseDialect(DialectMSSQL, "SELECT * FROM [dbo].[Müşteri] WHERE Id = 1")
+	if err != nil || len(quoted.Tables) != 1 || quoted.Tables[0].Schema != "dbo" || quoted.Tables[0].Name != "müşteri" {
+		t.Fatalf("tables=%v (err=%v)", quoted.Tables, err)
+	}
+	japanese, err := ParseDialect(DialectMySQL, "SELECT * FROM 注文 WHERE id = 1")
+	if err != nil || len(japanese.Tables) != 1 || japanese.Tables[0].Name != "注文" {
+		t.Fatalf("tables=%v (err=%v)", japanese.Tables, err)
+	}
+}
+
+func TestPostgresTableStatementNamesItsTable(t *testing.T) {
+	info, err := ParseDialect(DialectPostgres, "TABLE users")
+	if err != nil || info.Kind != Select || len(info.Tables) != 1 || info.Tables[0].Name != "users" {
+		t.Fatalf("kind=%s tables=%v (err=%v)", info.Kind, info.Tables, err)
+	}
+}
+
+// A table that follows FROM or INTO must not be aliased to the next keyword.
+func TestKeywordsAreNotAliases(t *testing.T) {
+	info, err := ParseDialect(DialectMSSQL, "SELECT * INTO archive FROM users")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range info.Tables {
+		if table.Alias == "from" || table.Alias == "into" {
+			t.Fatalf("a keyword became an alias: %v", info.Tables)
+		}
+	}
+}
