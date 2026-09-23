@@ -11,6 +11,17 @@ an entry here; after x.y.99 the next version is x.(y+1).0.
   cannot classify". `DECLARE` (a variable, a table variable or a cursor),
   `PRINT`, `OPEN`, `CLOSE` and `DEALLOCATE` are session statements, and
   `FETCH` is a read, so row limits and masking apply to its rows.
+- Fixed: a T-SQL block could hide a write. Statement splitting cuts on
+  semicolons, so `BEGIN TRY DELETE FROM orders` or `IF EXISTS (…) DROP TABLE
+  tmp` arrived as one statement and was read as session control; a block, IF
+  or WHILE now takes the kind of the riskiest statement inside it, and a DROP
+  or TRUNCATE inside one is recognised as such.
+- Changed: server and storage administration (`BACKUP`, `RESTORE`,
+  `CHECKPOINT`, `SHUTDOWN`, `RECONFIGURE`, `FLUSH`, `RESET`, `LOCK`,
+  `UNLOCK`, `REPAIR`) counts as a write: it changes the installation even
+  when it changes no row. `PREPARE` and `WAITFOR` stay unclassified on
+  purpose - the first hides its statement in a string, the second holds a
+  session open.
 - Changed: a write whose only target is a table variable and which reads no
   table (`INSERT INTO @Tables VALUES …`) counts as session state, since it
   changes nothing in the database; read-only roles may run it. A write that

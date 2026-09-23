@@ -161,16 +161,31 @@ func parseDialect(dialect Dialect, sql string) (Info, error) {
 		info.Kind, info.IsDrop = DDL, true
 	case "truncate":
 		info.Kind, info.IsTruncate = DDL, true
-	case "set", "use", "begin", "start", "commit", "rollback", "savepoint", "release", "discard",
+	case "begin", "if", "while", "else":
+		// These can wrap other statements (BEGIN TRY … END TRY, IF EXISTS(…)
+		// DELETE …), so the block takes the kind of the riskiest statement
+		// inside it. A block that wraps nothing - BEGIN TRANSACTION, IF with
+		// only an assignment - stays session control.
+		classifyBlock(&info)
+	case "set", "use", "start", "commit", "rollback", "savepoint", "release", "discard",
 		// Local to the session and changing no data: a variable, table
-		// variable or cursor declaration, a message, and the rest of the
-		// cursor verbs. Scripts that gather diagnostics start with these.
-		"declare", "print", "open", "close", "deallocate":
+		// variable or cursor declaration, a message, the rest of the cursor
+		// verbs, control flow that wraps nothing, and the batch separator.
+		// Scripts that gather diagnostics start with these.
+		// WAITFOR stays unclassified on purpose: it holds a session open and
+		// is the classic timing probe, so the guardrail should see it.
+		"declare", "print", "open", "close", "deallocate", "throw", "raiserror",
+		"return", "break", "continue", "goto", "go", "listen", "unlisten", "notify":
 		info.Kind = Session
 	case "create", "alter", "rename", "comment", "grant", "revoke", "call", "copy", "execute", "exec", "vacuum", "analyze", "attach", "detach",
-		"do", "load", "bulk", "optimize", "system", "kill", "put", "get", "remove", "undrop", "refresh", "reindex", "cluster", "dbcc":
+		"do", "load", "bulk", "optimize", "system", "kill", "put", "get", "remove", "undrop", "refresh", "reindex", "cluster", "dbcc",
+		// Server and storage administration: it changes the installation
+		// even when it changes no row, so it is never a read.
+		"backup", "restore", "checkpoint", "shutdown", "reconfigure", "flush", "reset", "lock", "unlock", "repair", "install", "uninstall":
 		info.Kind = DDL
 	default:
+		// Includes PREPARE: its statement is a string this parser cannot see
+		// through, so it stays unclassified and the guardrail decides.
 		info.Kind = Other
 	}
 	if info.Command == "" {
@@ -443,6 +458,33 @@ func classifyWith(tokens []Token) (Kind, Kind) {
 		risk = command
 	}
 	return risk, command
+}
+
+// classifyBlock gives a T-SQL block or control-flow statement the kind of the
+// riskiest statement it contains. Statement splitting cuts on semicolons, so
+// "BEGIN TRY DELETE FROM orders" can arrive as one statement; without this it
+// would pass as session control and skip every write rule.
+func classifyBlock(info *Info) {
+	info.Kind, info.Command = Session, Session
+	rank := map[Kind]int{Session: 0, Select: 1, Insert: 2, Update: 2, Delete: 2, DDL: 3}
+	for _, token := range info.Tokens[1:] {
+		kind, operation := tokenKind(token.Lower)
+		if !operation {
+			switch token.Lower {
+			case "drop":
+				kind, operation = DDL, true
+				info.IsDrop = true
+			case "truncate":
+				kind, operation = DDL, true
+				info.IsTruncate = true
+			case "create", "alter", "grant", "revoke", "exec", "execute", "call", "backup", "restore", "rename":
+				kind, operation = DDL, true
+			}
+		}
+		if operation && rank[kind] > rank[info.Kind] {
+			info.Kind, info.Command = kind, kind
+		}
+	}
 }
 
 func tokenKind(value string) (Kind, bool) {

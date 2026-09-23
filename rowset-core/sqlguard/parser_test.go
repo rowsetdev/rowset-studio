@@ -259,3 +259,50 @@ func TestCursorVerbsAreClassified(t *testing.T) {
 		}
 	}
 }
+
+// Statement splitting cuts on semicolons, so a T-SQL block can arrive with a
+// write inside it. The block must carry that write's kind, or the write rules
+// never see it.
+func TestBlocksTakeTheKindOfTheStatementInside(t *testing.T) {
+	for query, want := range map[string]Kind{
+		"BEGIN TRANSACTION":                                   Session,
+		"BEGIN TRY DELETE FROM orders":                        Delete,
+		"BEGIN UPDATE orders SET paid = 1":                    Update,
+		"IF EXISTS (SELECT 1 FROM orders) DELETE FROM orders": Delete,
+		"IF @count > 0 SET @count = 0":                        Session,
+		"WHILE @i < 10 INSERT INTO audit VALUES (@i)":         Insert,
+		"IF OBJECT_ID('tmp') IS NOT NULL DROP TABLE tmp":      DDL,
+		"IF EXISTS (SELECT 1 FROM orders) SELECT 1":           Select,
+	} {
+		info, err := ParseDialect("mssql", query)
+		if err != nil || info.Kind != want {
+			t.Fatalf("%q classified as %s, want %s (err=%v)", query, info.Kind, want, err)
+		}
+	}
+	drop, err := ParseDialect("mssql", "IF OBJECT_ID('tmp') IS NOT NULL DROP TABLE tmp")
+	if err != nil || !drop.IsDrop {
+		t.Fatalf("a DROP inside a block did not set IsDrop (err=%v)", err)
+	}
+	truncate, err := ParseDialect("mssql", "IF 1 = 1 TRUNCATE TABLE audit")
+	if err != nil || !truncate.IsTruncate || truncate.Kind != DDL {
+		t.Fatalf("a TRUNCATE inside a block classified as %s IsTruncate=%v (err=%v)", truncate.Kind, truncate.IsTruncate, err)
+	}
+}
+
+func TestAdministrationStatementsAreWrites(t *testing.T) {
+	for _, query := range []string{"BACKUP DATABASE payments TO DISK = 'p.bak'", "RESTORE DATABASE payments FROM DISK = 'p.bak'", "CHECKPOINT", "FLUSH TABLES", "LOCK TABLES orders WRITE"} {
+		info, err := Parse(query)
+		if err != nil || info.Kind != DDL || !IsWrite(info.Kind) {
+			t.Fatalf("%q classified as %s (err=%v)", query, info.Kind, err)
+		}
+	}
+}
+
+// PREPARE hides its statement in a string, so it must stay unclassified and
+// leave the decision to the guardrail.
+func TestPrepareStaysUnclassified(t *testing.T) {
+	info, err := Parse("PREPARE cleanup FROM 'DELETE FROM orders'")
+	if err != nil || info.Kind != Other {
+		t.Fatalf("PREPARE classified as %s (err=%v)", info.Kind, err)
+	}
+}
