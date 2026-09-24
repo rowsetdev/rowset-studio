@@ -1428,25 +1428,21 @@ function StatusBar({ run, onExportAllRows, filteredCount }: { run: TabRunState; 
           </span>
         )}
         {unclassified && (
-          // Rowset ran the statement but does not recognise its shape, so
-          // policies that depend on the shape could not judge it. Saying so
-          // beats silently pretending the statement was understood.
-          <span className="inline-flex min-w-0 items-center gap-2">
-            <span
-              className="inline-flex shrink-0 items-center gap-1 rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 font-medium text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300"
-              title="Rowset does not recognise this statement's shape. It ran unchanged, but rules that depend on the shape could not judge it."
-            >
-              <Icon name="shield" size={11} />
+          // Rowset ran the statement but does not recognise its shape. It is
+          // worth saying, and not worth interrupting anyone over: a quiet
+          // line that only asks for attention from someone looking for it.
+          <span className="inline-flex min-w-0 items-center gap-1.5 text-slate-400 dark:text-slate-500">
+            <span className="shrink-0" title="Rowset does not recognise this statement's shape. It ran unchanged, but rules that depend on the shape could not judge it.">
               Not recognised
             </span>
             <a
               href={UNRECOGNISED_STATEMENT_ISSUE}
               target="_blank"
               rel="noreferrer"
-              className="shrink-0 font-medium text-amber-800 hover:underline dark:text-amber-300"
+              className="shrink-0 underline decoration-dotted underline-offset-2 hover:text-slate-600 dark:hover:text-slate-300"
               title="Report the statement so a later release recognises it"
             >
-              Report it
+              report
             </a>
           </span>
         )}
