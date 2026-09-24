@@ -189,7 +189,7 @@ func TestMigrationChecksumsAreImmutable(t *testing.T) {
 			t.Fatalf("bad checksum for %s: %s", migration.name, migration.checksum)
 		}
 	}
-	if len(migrations) != 29 {
+	if len(migrations) != 30 {
 		t.Fatalf("migration inventory changed: got %d", len(migrations))
 	}
 }
@@ -298,5 +298,57 @@ func TestNewWorkspaceStartsWithTheGuardrailsThatMatter(t *testing.T) {
 		if override.Key == "deny_unclassified" && !override.Enabled {
 			t.Fatal("the guardrail could not be turned on")
 		}
+	}
+}
+
+// Upgrading a workspace that already exists follows the new default: on
+// someone's own machine the unclassified guardrail is turned off once, while
+// an installation several people share keeps it.
+func TestUpgradeRelaxesTheUnclassifiedGuardrailOnlyForAPersonalWorkspace(t *testing.T) {
+	ctx := context.Background()
+	for _, test := range []struct {
+		mode    string
+		shared  bool
+		enabled bool
+	}{{"personal", false, false}, {"shared", true, true}} {
+		t.Run(test.mode, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "rowset.sqlite3")
+			data, err := Open(ctx, path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := data.ClaimMode(ctx, test.shared); err != nil {
+				t.Fatal(err)
+			}
+			if err := data.CreateOrganization(ctx, domain.Organization{ID: "org", Name: "Org", CreatedAt: NowString()}); err != nil {
+				t.Fatal(err)
+			}
+			// What a release before this one left behind: the guardrail on,
+			// and the migration not yet applied.
+			if _, err := data.db.ExecContext(ctx, "UPDATE policies SET enabled=1 WHERE rule_type='deny_unclassified'"); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := data.db.ExecContext(ctx, "DELETE FROM rowset_go_migrations WHERE version=33"); err != nil {
+				t.Fatal(err)
+			}
+			if err := data.Close(); err != nil {
+				t.Fatal(err)
+			}
+
+			upgraded, err := Open(ctx, path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer upgraded.Close()
+			overrides, err := upgraded.ListPolicyOverrides(ctx, "org")
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, override := range overrides {
+				if override.Key == "deny_unclassified" && override.Enabled != test.enabled {
+					t.Fatalf("%s installation: deny_unclassified enabled=%v, want %v", test.mode, override.Enabled, test.enabled)
+				}
+			}
+		})
 	}
 }
