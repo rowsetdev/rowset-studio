@@ -82,6 +82,7 @@ func TestBackupReadsTheColumnsAnUpdateWrites(t *testing.T) {
 		{"a list Rowset cannot read", "postgres", "UPDATE orders SET (name, amount) = (SELECT 'x', 2) WHERE id = 1", "*"},
 		{"subquery in the value", "postgres", "UPDATE orders SET amount = (SELECT max(amount) FROM orders) WHERE id = 1", `"id", amount`},
 		{"a delete keeps the whole row", "postgres", "DELETE FROM orders WHERE id = 1", "*"},
+		{"a dot inside a quoted name", "postgres", `UPDATE orders SET "a.b" = 1 WHERE id = 1`, `"id", "a.b"`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			info, err := sqlguard.ParseDialect(sqlguard.DialectForEngine(test.engine), test.sql)
@@ -96,6 +97,25 @@ func TestBackupReadsTheColumnsAnUpdateWrites(t *testing.T) {
 				t.Fatalf("got %q, want %q", got, test.want)
 			}
 		})
+	}
+}
+
+// Every key column is read, in key order, so the restore can find the row.
+func TestBackupReadsEveryKeyColumn(t *testing.T) {
+	info, err := sqlguard.Parse("UPDATE orders SET name = 'x' WHERE tenant = 1 AND id = 2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, ok := backupTargetOf(info)
+	if !ok {
+		t.Fatal("not a backed-up statement")
+	}
+	if got := backupSelectList("postgres", plan, info, []string{"tenant", "id"}, nil); got != `"tenant", "id", name` {
+		t.Fatalf("got %q", got)
+	}
+	// A column the engine rewrites on its own is read as well, once.
+	if got := backupSelectList("mysql", plan, info, []string{"id"}, []string{"touched", "name"}); got != "`id`, name, `touched`" {
+		t.Fatalf("got %q", got)
 	}
 }
 
