@@ -5,7 +5,7 @@ and `scripts/package-macos.sh` stamp it into Studio (sidebar), the `rowset`
 executable and the macOS app. Every change set bumps the patch version and adds
 an entry here; after x.y.99 the next version is x.(y+1).0.
 
-## 0.1.3 — 2026-09-23
+## 0.1.3 — 2026-09-25
 
 - Changed: a workspace no longer blocks statements the parser has not
   learned yet. Existing personal workspaces are relaxed once on upgrade;
