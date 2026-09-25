@@ -117,6 +117,35 @@ type cassandraRowBackupPayload struct {
 // to change, the same way captureRowBackup does for SQL. It returns nil when
 // the statement isn't a simple single-table UPDATE/DELETE — nothing to back
 // up, not an error.
+// cassandraBackupSelectList keeps an UPDATE's backup to the primary key and
+// the columns the statement writes, the same way the SQL engines do, so a
+// restore never puts back a column this statement never touched. Anything it
+// cannot read column by column keeps the whole row.
+func cassandraBackupSelectList(plan backupTarget, info sqlguard.Info, primaryKey []string) string {
+	if plan.kind != "update" {
+		return "*"
+	}
+	names, written, ok := assignedColumns(info)
+	if !ok {
+		return "*"
+	}
+	inKey := map[string]bool{}
+	for _, name := range primaryKey {
+		inKey[strings.ToLower(name)] = true
+	}
+	list := make([]string, 0, len(primaryKey)+len(written))
+	for _, name := range primaryKey {
+		list = append(list, cassandraQuotedIdentifier(name))
+	}
+	for index, name := range names {
+		if inKey[name] {
+			return "*"
+		}
+		list = append(list, written[index])
+	}
+	return strings.Join(list, ", ")
+}
+
 func (s *Server) cassandraCaptureBackup(ctx context.Context, identity domain.Identity, connection domain.Connection, info sqlguard.Info, target engine.Connection, keyspace, statement string) Annotations {
 	plan, ok := cassandraBackupTargetOf(info)
 	if !ok || s.vault == nil {
@@ -145,7 +174,7 @@ func (s *Server) cassandraCaptureBackup(ctx context.Context, identity domain.Ide
 			return skipped(fmt.Sprintf("column %q has a type (%s) row backups don't support yet", column.Name, column.Type))
 		}
 	}
-	selectCQL := "SELECT * FROM " + cassandraQuotedTable(ks, plan.table) + " WHERE " + plan.where
+	selectCQL := "SELECT " + cassandraBackupSelectList(plan, info, tableInfo.PrimaryKey) + " FROM " + cassandraQuotedTable(ks, plan.table) + " WHERE " + plan.where
 	columns, rows, truncated, err := s.engines.CassandraSelectRaw(ctx, target, ks, selectCQL, rowBackupLimit+1)
 	if err != nil {
 		return skipped("the changed rows could not be read: " + err.Error())

@@ -60,3 +60,64 @@ func TestRestoreSQL(t *testing.T) {
 		t.Fatalf("mysql restore:\n%s", got)
 	}
 }
+
+// What an UPDATE writes decides what the backup reads. Anything the SET list
+// cannot be read from column by column falls back to the whole row, because
+// keeping too much is recoverable and keeping too little is not.
+func TestBackupReadsTheColumnsAnUpdateWrites(t *testing.T) {
+	key := []string{"id"}
+	for _, test := range []struct {
+		name, engine, sql, want string
+	}{
+		{"one column", "postgres", "UPDATE orders SET name = 'x' WHERE id = 1", `"id", name`},
+		{"several columns", "postgres", "UPDATE orders SET name = 'x', amount = 2 WHERE id = 1", `"id", name, amount`},
+		{"values with commas and parentheses", "postgres",
+			"UPDATE orders SET name = concat(a, b), amount = CASE WHEN c IN (1, 2) THEN 3 ELSE 4 END WHERE id = 1", `"id", name, amount`},
+		{"the same column twice", "postgres", "UPDATE orders SET name = 'x', name = 'y' WHERE id = 1", `"id", name`},
+		{"quoted column keeps its case", "postgres", `UPDATE orders SET "Name" = 'x' WHERE id = 1`, `"id", "Name"`},
+		{"table-qualified column", "mysql", "UPDATE orders SET orders.name = 'x' WHERE id = 1", "`id`, name"},
+		{"backquoted column", "mysql", "UPDATE orders SET `name` = 'x' WHERE id = 1", "`id`, `name`"},
+		{"bracketed column", "mssql", "UPDATE orders SET [name] = N'x' WHERE id = 1", "[id], [name]"},
+		{"a key column is written", "postgres", "UPDATE orders SET id = 2, name = 'x' WHERE id = 1", "*"},
+		{"a list Rowset cannot read", "postgres", "UPDATE orders SET (name, amount) = (SELECT 'x', 2) WHERE id = 1", "*"},
+		{"subquery in the value", "postgres", "UPDATE orders SET amount = (SELECT max(amount) FROM orders) WHERE id = 1", `"id", amount`},
+		{"a delete keeps the whole row", "postgres", "DELETE FROM orders WHERE id = 1", "*"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			info, err := sqlguard.ParseDialect(sqlguard.DialectForEngine(test.engine), test.sql)
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan, ok := backupTargetOf(info)
+			if !ok {
+				t.Fatalf("%q is not a backed-up statement", test.sql)
+			}
+			if got := backupSelectList(test.engine, plan, info, key, nil); got != test.want {
+				t.Fatalf("got %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestAssignedColumnsRefusesWhatItCannotRead(t *testing.T) {
+	for _, sql := range []string{
+		"UPDATE orders SET (name, amount) = (SELECT 'x', 2) WHERE id = 1",
+		"UPDATE orders SET 1 = 1 WHERE id = 1",
+	} {
+		info, err := sqlguard.Parse(sql)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, ok := assignedColumns(info); ok {
+			t.Fatalf("%q was read as a plain SET list", sql)
+		}
+	}
+	info, err := sqlguard.Parse("UPDATE orders SET name = 'x', amount = 2 WHERE id = 1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	names, written, ok := assignedColumns(info)
+	if !ok || len(names) != 2 || names[0] != "name" || names[1] != "amount" || written[0] != "name" {
+		t.Fatalf("names=%v written=%v ok=%v", names, written, ok)
+	}
+}

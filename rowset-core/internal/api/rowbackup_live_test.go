@@ -108,6 +108,53 @@ func TestLiveRowBackupRestoresUpdateAndDelete(t *testing.T) {
 				t.Fatalf("delete restore:\nwant %s\ngot  %s", before, got)
 			}
 
+			// An UPDATE is backed up column by column: the script puts back
+			// the key and the columns the statement wrote, and says nothing
+			// about the rest of the row, so a restore cannot undo someone
+			// else's later edit to a column this statement never touched.
+			script := func(result map[string]any) string {
+				t.Helper()
+				r := personalRequest(identity, "")
+				r.SetPathValue("id", result["backup"].(map[string]any)["id"].(string))
+				w := httptest.NewRecorder()
+				s.rowBackupRestore(w, r)
+				var body struct{ SQL string }
+				if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &body) != nil {
+					t.Fatalf("restore script: %d %s", w.Code, w.Body.String())
+				}
+				return body.SQL
+			}
+			partial := query("UPDATE " + table + " SET name = 'one column' WHERE id = 3")
+			text := script(partial)
+			if !strings.Contains(strings.ToLower(text), "name") || !strings.Contains(strings.ToLower(text), "id") {
+				t.Fatalf("the script lost the changed column or the key: %s", text)
+			}
+			for _, untouched := range []string{"amount", "paid", "placed", "data"} {
+				if strings.Contains(strings.ToLower(text), untouched) {
+					t.Fatalf("the backup kept %s, which the statement never wrote: %s", untouched, text)
+				}
+			}
+			restore(partial)
+			if got := snapshot(); got != before {
+				t.Fatalf("one-column restore:\nwant %s\ngot  %s", before, got)
+			}
+
+			// MySQL rewrites an ON UPDATE CURRENT_TIMESTAMP column by itself,
+			// so the backup keeps it even though no statement names it.
+			if engine.engine == "mysql" || engine.engine == "mariadb" {
+				stamped := table + "_stamped"
+				query("CREATE TABLE " + stamped + "(id int primary key, name varchar(40), touched datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3))")
+				query("INSERT INTO " + stamped + "(id, name, touched) VALUES (1, 'a', '2024-01-01 00:00:00.000')")
+				changed := query("UPDATE " + stamped + " SET name = 'b' WHERE id = 1")
+				if text := script(changed); !strings.Contains(strings.ToLower(text), "touched") {
+					t.Fatalf("the backup lost the column MySQL rewrites: %s", text)
+				}
+				restore(changed)
+				if got := fmt.Sprint(query("SELECT name, touched FROM " + stamped + " WHERE id = 1")["rows"]); !strings.Contains(got, "2024-01-01 00:00:00") {
+					t.Fatalf("the restore did not put the rewritten column back: %s", got)
+				}
+			}
+
 			apply := func(result map[string]any) *httptest.ResponseRecorder {
 				t.Helper()
 				r := personalRequest(identity, "")
@@ -159,7 +206,14 @@ func TestLiveRowBackupRestoresUpdateAndDelete(t *testing.T) {
 			list := httptest.NewRecorder()
 			s.listRowBackups(list, personalRequest(identity, ""))
 			var listed struct{ Backups []map[string]any }
-			if json.Unmarshal(list.Body.Bytes(), &listed) != nil || len(listed.Backups) != 7 {
+			// Two more than the statements above: restoring is itself a
+			// write, so each restore is backed up too. MySQL runs two more
+			// for the column it rewrites on its own.
+			want := 9
+			if engine.engine == "mysql" || engine.engine == "mariadb" {
+				want = 11
+			}
+			if json.Unmarshal(list.Body.Bytes(), &listed) != nil || len(listed.Backups) != want {
 				t.Fatalf("backups: %s", list.Body.String())
 			}
 		})

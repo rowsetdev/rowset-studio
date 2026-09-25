@@ -5,6 +5,18 @@ and `scripts/package-macos.sh` stamp it into Studio (sidebar), the `rowset`
 executable and the macOS app. Every change set bumps the patch version and adds
 an entry here; after x.y.99 the next version is x.(y+1).0.
 
+## 0.1.4 — 2026-09-25
+
+- Changed: the backup taken before an UPDATE now keeps the row's key and the
+  columns that statement writes, instead of the whole row. Restoring it can
+  no longer undo a change someone else made afterwards to a column the
+  statement never touched, and values it never read stay out of the backup.
+  DELETE still keeps the whole row, since putting it back needs all of it.
+  A SET list Rowset cannot read column by column, and an UPDATE that writes
+  a key column, keep the whole row as before. MySQL columns with ON UPDATE
+  CURRENT_TIMESTAMP are kept too, because the engine rewrites them without
+  the statement naming them. The same applies to Cassandra.
+
 ## 0.1.3 — 2026-09-25
 
 - Changed: a workspace no longer blocks statements the parser has not

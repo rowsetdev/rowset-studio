@@ -82,6 +82,77 @@ func backupTargetOf(info sqlguard.Info) (backupTarget, bool) {
 	return backupTarget{kind: kind, schema: table.Schema, table: table.Name, where: clause}, true
 }
 
+// numberToken reports whether an unquoted token is a number rather than a
+// name: the lexer makes both identifiers.
+func numberToken(token sqlguard.Token) bool {
+	return !token.Quoted && token.Text != "" && token.Text[0] >= '0' && token.Text[0] <= '9'
+}
+
+// assignedColumns lists the columns an UPDATE writes, as the statement spells
+// them, so only those need backing up. The second result is false when the
+// SET list is not a plain column-by-column assignment - SET (a, b) = (SELECT
+// ...) and the like - and the whole row is kept instead.
+//
+// backupTargetOf has already refused joins, extra FROM clauses and WITH, so
+// the SET list here is the simple one every engine writes the same way.
+func assignedColumns(info sqlguard.Info) (names, written []string, ok bool) {
+	var top []sqlguard.Token
+	for _, token := range info.Tokens {
+		if token.Depth == 0 {
+			top = append(top, token)
+		}
+	}
+	start, end := -1, len(top)
+	for index, token := range top {
+		if token.Quoted {
+			continue
+		}
+		if start < 0 && token.Lower == "set" {
+			start = index + 1
+			continue
+		}
+		if start >= 0 && token.Lower == "where" {
+			end = index
+			break
+		}
+	}
+	if start < 0 || start >= end {
+		return nil, nil, false
+	}
+	seen := map[string]bool{}
+	for index := start; index < end; {
+		// alias.column and schema.table.column: the column is the last name.
+		// A number lexes as an identifier too, so SET 1 = 1 is refused here
+		// rather than read as a column called 1.
+		if !top[index].Identifier || numberToken(top[index]) {
+			return nil, nil, false
+		}
+		name, raw := top[index].Lower, top[index].Text
+		index++
+		for index+1 < end && top[index].Text == "." && top[index+1].Identifier && !numberToken(top[index+1]) {
+			name, raw = top[index+1].Lower, top[index+1].Text
+			index += 2
+		}
+		if index >= end || top[index].Text != "=" {
+			return nil, nil, false
+		}
+		if !seen[name] {
+			seen[name] = true
+			names = append(names, name)
+			written = append(written, raw)
+		}
+		// The value runs to the next comma of the SET list.
+		for index < end && top[index].Text != "," {
+			index++
+		}
+		index++
+	}
+	if len(names) == 0 {
+		return nil, nil, false
+	}
+	return names, written, true
+}
+
 func qualifiedTable(engineName, schema, table string) string {
 	name := quoteSQLIdentifier(engineName, table)
 	if schema != "" {
@@ -128,7 +199,10 @@ func columnKindsSQL(engineName, schema, table string) string {
 		if schema != "" {
 			schemaSQL = importLiteral(engineName, schema)
 		}
-		return "SELECT column_name, 'generated' FROM information_schema.columns WHERE table_schema = " + schemaSQL + " AND table_name = " + importLiteral(engineName, table) + " AND extra IN ('STORED GENERATED', 'VIRTUAL GENERATED')"
+		// "refresh" is a column MySQL rewrites on its own with ON UPDATE
+		// CURRENT_TIMESTAMP. The statement never names it, so a backup that
+		// only keeps the written columns would lose its old value.
+		return "SELECT column_name, CASE WHEN extra LIKE '%on update%' THEN 'refresh' ELSE 'generated' END FROM information_schema.columns WHERE table_schema = " + schemaSQL + " AND table_name = " + importLiteral(engineName, table) + " AND (extra IN ('STORED GENERATED', 'VIRTUAL GENERATED') OR extra LIKE '%on update%')"
 	case "sqlite":
 		return "SELECT name, 'generated' FROM pragma_table_xinfo(" + importLiteral(engineName, table) + ") WHERE hidden IN (2, 3)"
 	case "duckdb":
@@ -291,6 +365,49 @@ type rowBackupPayload struct {
 	Types []string `json:"types,omitempty"`
 }
 
+// backupSelectList decides what the backup reads. A DELETE needs the whole
+// row to put it back; an UPDATE only needs its key and the columns it writes,
+// which keeps other people's later edits to the same row from being undone by
+// a restore, and keeps values the statement never touched out of the backup.
+// The whole row is read when the SET list cannot be read column by column,
+// and when the statement writes a key column: the restore then has to find a
+// row whose key has moved, and it says so rather than guessing.
+func backupSelectList(engineName string, plan backupTarget, info sqlguard.Info, key, refreshed []string) string {
+	if plan.kind != "update" {
+		return "*"
+	}
+	names, written, ok := assignedColumns(info)
+	if !ok {
+		return "*"
+	}
+	inKey := map[string]bool{}
+	for _, name := range key {
+		inKey[strings.ToLower(name)] = true
+	}
+	list := make([]string, 0, len(key)+len(written)+len(refreshed))
+	for _, name := range key {
+		list = append(list, quoteSQLIdentifier(engineName, name))
+	}
+	for index, name := range names {
+		if inKey[name] {
+			return "*"
+		}
+		// The column as the statement wrote it: already quoted the way this
+		// engine quotes, or unquoted and folded the way this engine folds.
+		list = append(list, written[index])
+	}
+	taken := map[string]bool{}
+	for _, name := range append(append([]string{}, key...), names...) {
+		taken[strings.ToLower(name)] = true
+	}
+	for _, name := range refreshed {
+		if !taken[strings.ToLower(name)] {
+			list = append(list, quoteSQLIdentifier(engineName, name))
+		}
+	}
+	return strings.Join(list, ", ")
+}
+
 // captureRowBackup saves the rows a simple UPDATE or DELETE is about to change
 // and returns response fields describing the backup, or why none was taken.
 // "backupBlocked" means the statement must not run until the user agrees to
@@ -303,24 +420,45 @@ func (s *Server) captureRowBackup(ctx context.Context, identity domain.Identity,
 		return nil
 	}
 	skipped := func(reason string) Annotations { return Annotations{"backupSkipped": reason} }
+	blocked := func(reason string) Annotations { return Annotations{"backupBlocked": reason} }
 	table := qualifiedTable(connection.Engine, plan.schema, plan.table)
-	selectSQL := "SELECT * FROM " + table + " WHERE " + plan.where
-	if _, err := sqlguard.Parse(selectSQL); err != nil {
-		return skipped("the changed rows could not be selected")
-	}
 	savepoint := transaction != nil && connection.Engine == "postgres"
 	if savepoint {
 		if _, err := transaction.Execute(ctx, "SAVEPOINT rowset_backup", 0); err != nil {
 			return skipped("the transaction does not allow a backup")
 		}
 	}
-	columns, types, rows, readErr := s.readRows(ctx, target, transaction, selectSQL, rowBackupLimit+1)
-	var keyRows, kindRows [][]any
-	if readErr == nil {
-		_, _, keyRows, readErr = s.readRows(ctx, target, transaction, primaryKeySQL(connection.Engine, plan.schema, plan.table), 64)
-	}
+	// The primary key and the column kinds decide what the backup must hold,
+	// so they are read before the rows themselves.
+	var keyRows, kindRows, rows [][]any
+	var columns, types []string
+	_, _, keyRows, readErr := s.readRows(ctx, target, transaction, primaryKeySQL(connection.Engine, plan.schema, plan.table), 64)
 	if readErr == nil {
 		_, _, kindRows, readErr = s.readRows(ctx, target, transaction, columnKindsSQL(connection.Engine, plan.schema, plan.table), 4096)
+	}
+	key := make([]string, 0, len(keyRows))
+	for _, row := range keyRows {
+		if len(row) > 0 {
+			key = append(key, encodeBackupValue(row[0], "").Value)
+		}
+	}
+	// Columns the engine rewrites on its own are part of the old row even
+	// though the statement never names them.
+	var refreshed []string
+	for _, row := range kindRows {
+		if len(row) >= 2 && encodeBackupValue(row[1], "").Value == "refresh" {
+			refreshed = append(refreshed, encodeBackupValue(row[0], "").Value)
+		}
+	}
+	var selectSQL string
+	if readErr == nil {
+		selectSQL = "SELECT " + backupSelectList(connection.Engine, plan, info, key, refreshed) + " FROM " + table + " WHERE " + plan.where
+		if _, err := sqlguard.Parse(selectSQL); err != nil {
+			readErr = errors.New("the changed rows could not be selected")
+		}
+	}
+	if readErr == nil {
+		columns, types, rows, readErr = s.readRows(ctx, target, transaction, selectSQL, rowBackupLimit+1)
 	}
 	if savepoint {
 		release := "RELEASE SAVEPOINT rowset_backup"
@@ -332,21 +470,14 @@ func (s *Server) captureRowBackup(ctx context.Context, identity domain.Identity,
 	if readErr != nil {
 		return skipped("the changed rows could not be read: " + readErr.Error())
 	}
+	if plan.kind == "update" && len(key) == 0 {
+		return blocked(fmt.Sprintf("%s has no primary key, so the old values could not be put back.", plan.table))
+	}
 	if len(rows) == 0 {
 		return nil
 	}
-	blocked := func(reason string) Annotations { return Annotations{"backupBlocked": reason} }
 	if len(rows) > rowBackupLimit {
 		return blocked(fmt.Sprintf("This %s changes more than %d rows, too many to back up.", strings.ToUpper(plan.kind), rowBackupLimit))
-	}
-	key := make([]string, 0, len(keyRows))
-	for _, row := range keyRows {
-		if len(row) > 0 {
-			key = append(key, encodeBackupValue(row[0], "").Value)
-		}
-	}
-	if plan.kind == "update" && len(key) == 0 {
-		return blocked(fmt.Sprintf("%s has no primary key, so the old values could not be put back.", plan.table))
 	}
 	// Leading comments are left out of the saved statement.
 	statement := info.Raw
@@ -362,6 +493,9 @@ func (s *Server) captureRowBackup(ctx context.Context, identity domain.Identity,
 		switch kind {
 		case "generated":
 			payload.Generated = append(payload.Generated, name)
+		case "refresh":
+			// Kept in the backup, but written back like any other column.
+			continue
 		case "identity_always":
 			payload.IdentityAlways = true
 			payload.Identity = append(payload.Identity, name)
@@ -520,6 +654,9 @@ func restoreSQL(engineName string, item store.RowBackup, payload rowBackupPayloa
 	}
 	if identityInsert {
 		out.WriteString("-- " + table + " has an identity column, so these INSERTs need IDENTITY_INSERT, which the editor cannot turn on.\n-- Use Restore in Activity → Row backups instead; it runs them in one transaction.\n")
+	}
+	if item.Kind == "update" {
+		out.WriteString("-- Only the columns that statement wrote are put back, so a later change to any other column of these rows stays.\n")
 	}
 	out.WriteString("-- Review before running. In manual commit mode nothing is saved until you press Commit.\n\n")
 	for _, statement := range statements {
