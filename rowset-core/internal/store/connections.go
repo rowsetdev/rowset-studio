@@ -193,3 +193,11 @@ func (s *Store) DeleteSecret(ctx context.Context, id string) error {
 }
 
 func placeholders(count int) string { return strings.TrimRight(strings.Repeat("?,", count), ",") }
+
+// AnySecret returns one stored secret, so a server can check at startup that
+// its encryption key still opens what this database holds.
+func (s *Store) AnySecret(ctx context.Context) (domain.Secret, error) {
+	var secret domain.Secret
+	err := s.db.QueryRowContext(ctx, "SELECT id,ciphertext,nonce FROM secrets LIMIT 1").Scan(&secret.ID, &secret.Ciphertext, &secret.Nonce)
+	return secret, mapError(err)
+}

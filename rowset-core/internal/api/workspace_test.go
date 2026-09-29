@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/rowsetdev/rowset-studio/rowset-core/internal/domain"
+	"github.com/rowsetdev/rowset-studio/rowset-core/internal/vault"
 )
 
 func workspaceRequest(s *Server, identity domain.Identity, method, body string) *httptest.ResponseRecorder {
@@ -113,5 +114,45 @@ func TestWorkspaceValidationAndAuthentication(t *testing.T) {
 	var response struct{ Document workspaceDocument }
 	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil || response.Document.Tabs[0].Database != "CaseDb" {
 		t.Fatal("database context lost")
+	}
+}
+
+// Drafts saved under a key this installation no longer has are not a
+// transient failure. The answer has to name the cause and the way back,
+// because the only other sign is "crypto operation failed" in a log.
+func TestWorkspaceSaysWhenTheEncryptionKeyChanged(t *testing.T) {
+	s, owner := personalServer(t)
+	if w := workspaceRequest(s, owner, "PUT", testWorkspace); w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	changed, err := vault.New(bytes.Repeat([]byte{7}, 32), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.vault = changed
+	w := workspaceRequest(s, owner, "GET", "")
+	if w.Code != 500 || !strings.Contains(w.Body.String(), "WORKSPACE_KEY_MISMATCH") {
+		t.Fatalf("a changed key was not reported as such: %d %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "ROWSET_ENC_KEY_PREVIOUS") {
+		t.Fatalf("the answer does not say how to get the drafts back: %s", w.Body.String())
+	}
+	// The drafts themselves are left alone.
+	stored, err := s.store.Workspace(context.Background(), owner.UserID)
+	if err != nil || len(stored.Ciphertext) == 0 {
+		t.Fatalf("stored workspace: %v", err)
+	}
+}
+
+// A server whose key no longer opens the database says so once, at startup.
+func TestStartupReportsAnEncryptionKeyThatDoesNotMatch(t *testing.T) {
+	s, _ := personalServer(t)
+	if err := s.store.CreateSecret(context.Background(), domain.Secret{ID: "secret-1", Ciphertext: []byte("not-openable"), Nonce: bytes.Repeat([]byte{1}, 12)}); err != nil {
+		t.Fatal(err)
+	}
+	s.encryptionKeyMatches = true
+	s.checkEncryptionKey(context.Background())
+	if s.encryptionKeyMatches {
+		t.Fatal("a key that cannot open the database was reported as matching")
 	}
 }

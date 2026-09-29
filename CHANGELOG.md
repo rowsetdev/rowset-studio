@@ -12,6 +12,13 @@ an entry here; after x.y.99 the next version is x.(y+1).0.
   so picking the middle one failed with "environment must be dev or prod".
   There are now three environments - dev, test (staging, pre-production, UAT
   or QA) and prod - and the server accepts the usual spellings of each.
+- Changed: when the encryption key of an installation no longer matches its
+  database - a restored or regenerated `ROWSET_ENC_KEY` - the server says so
+  once at startup, and Studio explains it where it used to show only
+  "Workspace could not be decrypted or validated". Saved drafts are left
+  untouched; putting the original key back (or naming it in
+  `ROWSET_ENC_KEY_PREVIOUS`) opens them again, and the card offers to start
+  an empty workspace instead.
 - Fixed: the Test filter on Connections could never match anything, because
   a connection saved as test was stored as dev; the yellow badge and rail for
   that environment were unreachable for the same reason.

@@ -23,44 +23,48 @@ import (
 )
 
 type Server struct {
-	awake               awake
-	localMu             sync.Mutex
-	localTickets        map[string]time.Time
-	config              config.Config
-	store               *store.Store
-	activity            activity.Store
-	issuer              *auth.Issuer
-	logger              *slog.Logger
-	vault               *vault.Vault
-	engines             *engine.Manager
-	txnMu               sync.Mutex
-	txns                map[string]*transactionEntry
-	mongoTxnMu          sync.Mutex
-	mongoTxns           map[string]*mongoTxnEntry
-	stopTransactions    context.CancelFunc
-	topologyMu          sync.Mutex
-	topologyLocks       map[string]*sync.Mutex
-	stopTopology        context.CancelFunc
-	rateMu              sync.Mutex
-	rateClients         map[string]*rateWindow
-	statementHooks      []statementHook
-	resultHooks         []resultHook
-	routeRegistrars     []RouteRegistrar
-	escalation          Escalation
-	access              Access
-	webUI               http.Handler
-	connectionDetails   []func(context.Context, domain.Connection, map[string]any)
-	connectionSaveHooks []ConnectionSaveHook
-	connectionFields    map[string]bool
-	scheduleMu          sync.Mutex
-	scheduleRunning     map[string]bool
-	scheduleContext     context.Context
-	stopSchedules       context.CancelFunc
-	scheduleRuns        sync.WaitGroup
-	importMu            sync.Mutex
-	stopRetention       context.CancelFunc
-	stopAuditVerify     context.CancelFunc
-	imports             map[string]*csvUpload
+	awake awake
+	// encryptionKeyMatches is false when the key this server holds cannot
+	// open a secret already in the database, which makes saved connections
+	// and drafts unreadable until the original key comes back.
+	encryptionKeyMatches bool
+	localMu              sync.Mutex
+	localTickets         map[string]time.Time
+	config               config.Config
+	store                *store.Store
+	activity             activity.Store
+	issuer               *auth.Issuer
+	logger               *slog.Logger
+	vault                *vault.Vault
+	engines              *engine.Manager
+	txnMu                sync.Mutex
+	txns                 map[string]*transactionEntry
+	mongoTxnMu           sync.Mutex
+	mongoTxns            map[string]*mongoTxnEntry
+	stopTransactions     context.CancelFunc
+	topologyMu           sync.Mutex
+	topologyLocks        map[string]*sync.Mutex
+	stopTopology         context.CancelFunc
+	rateMu               sync.Mutex
+	rateClients          map[string]*rateWindow
+	statementHooks       []statementHook
+	resultHooks          []resultHook
+	routeRegistrars      []RouteRegistrar
+	escalation           Escalation
+	access               Access
+	webUI                http.Handler
+	connectionDetails    []func(context.Context, domain.Connection, map[string]any)
+	connectionSaveHooks  []ConnectionSaveHook
+	connectionFields     map[string]bool
+	scheduleMu           sync.Mutex
+	scheduleRunning      map[string]bool
+	scheduleContext      context.Context
+	stopSchedules        context.CancelFunc
+	scheduleRuns         sync.WaitGroup
+	importMu             sync.Mutex
+	stopRetention        context.CancelFunc
+	stopAuditVerify      context.CancelFunc
+	imports              map[string]*csvUpload
 }
 
 func New(cfg config.Config, data *store.Store, issuer *auth.Issuer, logger *slog.Logger) *Server {
@@ -92,7 +96,29 @@ func NewWithActivity(cfg config.Config, data *store.Store, activityStore activit
 	server.imports = map[string]*csvUpload{}
 	server.scheduleContext, server.stopSchedules = context.WithCancel(context.Background())
 	go server.scheduler(server.scheduleContext)
+	server.checkEncryptionKey(context.Background())
 	return server
+}
+
+// checkEncryptionKey says once, at startup, whether the key this server was
+// given still opens what the database holds. Without it the only sign is a
+// "crypto operation failed" on every connection, which says nothing about
+// the cause or the way back.
+func (s *Server) checkEncryptionKey(ctx context.Context) {
+	// Nothing encrypted yet, or no vault to check with: there is nothing this
+	// key could already be wrong about.
+	secret, err := s.store.AnySecret(ctx)
+	if err != nil || s.vault == nil || len(secret.Nonce) == 0 {
+		s.encryptionKeyMatches = true
+		return
+	}
+	_, err = s.vault.Decrypt(secret.Ciphertext, secret.Nonce)
+	s.encryptionKeyMatches = err == nil
+	if err != nil {
+		s.logger.Error("the encryption key does not match this database",
+			"detail", "connection passwords and saved drafts were encrypted with a different ROWSET_ENC_KEY",
+			"fix", "put the original key back, or set ROWSET_ENC_KEY_PREVIOUS to it and Rowset re-encrypts what it reads")
+	}
 }
 
 func (s *Server) Close() error {

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { api } from "../../lib/api";
+import { ApiError, api } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { Button, Panel } from "../../components/ui";
 import { validWorkspace, mergeWorkspace, missingTabs, WorkspaceWriter, type WorkspaceDocument, type WorkspaceSnapshot } from "./workspace";
@@ -52,6 +52,10 @@ export default function WorkspaceGate({ children }: { children: (snapshot: Works
   const [draft, setDraft] = useState<WorkspaceDocument | null>(null);
   const [recoveries, setRecoveries] = useState(localRecoveries);
   const [error, setError] = useState("");
+  // A workspace encrypted with a key this installation no longer has is not
+  // a transient failure: retrying will not help, so the card offers a way
+  // forward instead of only "Try again".
+  const [keyMismatch, setKeyMismatch] = useState(false);
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let alive = true;
@@ -68,7 +72,11 @@ export default function WorkspaceGate({ children }: { children: (snapshot: Works
       setSnapshot(value);
       setRecoveries(pending);
       if (pending.length) setDraft(base); else setInitial(base);
-    }).catch(err => { if (alive) setError(err instanceof Error ? err.message : "Workspace unavailable"); });
+    }).catch(err => {
+      if (!alive) return;
+      setKeyMismatch(err instanceof ApiError && err.body.code === "WORKSPACE_KEY_MISMATCH");
+      setError(err instanceof Error ? err.message : "Workspace unavailable");
+    });
     return () => { alive = false; };
   }, [attempt]);
 
@@ -77,7 +85,19 @@ export default function WorkspaceGate({ children }: { children: (snapshot: Works
       <GateCard title="Your workspace could not be loaded">
         <p>{error}</p>
         <div className="mt-4 flex flex-wrap gap-2">
-          <Button onClick={() => { setError(""); setAttempt(n => n + 1); }}>Try again</Button>
+          <Button onClick={() => { setError(""); setKeyMismatch(false); setAttempt(n => n + 1); }}>Try again</Button>
+          {keyMismatch && (
+            <LinkButton
+              onClick={() => {
+                if (!confirm("Start with an empty workspace? Your saved drafts stay in the database, but the first draft saved from here replaces them.")) return;
+                setSnapshot({ revision: 0, document: null });
+                setInitial(legacyWorkspace());
+                setError("");
+              }}
+            >
+              Start a new workspace
+            </LinkButton>
+          )}
           {recoveries.map(item => <LinkButton key={item.key} onClick={() => exportWorkspace(item.document)}>Download unsaved tabs ({formatDate(item.date)})</LinkButton>)}
         </div>
       </GateCard>

@@ -68,7 +68,14 @@ func (s *Server) getWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	plain, err := s.vault.Decrypt(item.Ciphertext, item.Nonce)
 	var envelope workspaceEnvelope
-	if err != nil || json.Unmarshal(plain, &envelope) != nil || envelope.UserID != identity.UserID || envelope.OrgID != identity.OrgID || !validWorkspace(envelope.Document) {
+	if err != nil {
+		// The saved drafts are still there; this server just cannot read
+		// them. Say which key is missing instead of leaving someone with a
+		// blank screen and no way back.
+		writeError(w, 500, "WORKSPACE_KEY_MISMATCH", "Your saved drafts were encrypted with a different key (ROWSET_ENC_KEY) and cannot be read by this installation. They are unchanged: put the original key back, or set ROWSET_ENC_KEY_PREVIOUS to it, and they open again.")
+		return
+	}
+	if json.Unmarshal(plain, &envelope) != nil || envelope.UserID != identity.UserID || envelope.OrgID != identity.OrgID || !validWorkspace(envelope.Document) {
 		writeError(w, 500, "WORKSPACE_UNAVAILABLE", "Workspace could not be decrypted or validated; existing drafts have not been changed.")
 		return
 	}
