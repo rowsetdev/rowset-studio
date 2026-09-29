@@ -5,6 +5,17 @@ and `scripts/package-macos.sh` stamp it into Studio (sidebar), the `rowset`
 executable and the macOS app. Every change set bumps the patch version and adds
 an entry here; after x.y.99 the next version is x.(y+1).0.
 
+## 0.1.5 — 2026-09-29
+
+- Fixed: a connection could not be saved with the middle environment. Studio
+  offered dev, preprod and prod while the server accepted only dev or prod,
+  so picking the middle one failed with "environment must be dev or prod".
+  There are now three environments - dev, test (staging, pre-production, UAT
+  or QA) and prod - and the server accepts the usual spellings of each.
+- Fixed: the Test filter on Connections could never match anything, because
+  a connection saved as test was stored as dev; the yellow badge and rail for
+  that environment were unreachable for the same reason.
+
 ## 0.1.4 — 2026-09-25
 
 - Changed: the backup taken before an UPDATE now keeps the row's key and the

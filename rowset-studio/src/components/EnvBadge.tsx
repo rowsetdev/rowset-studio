@@ -6,7 +6,7 @@ type EnvKind = "dev" | "test" | "prod";
 function kindOf(env: string): EnvKind {
   const e = env.toLowerCase();
   if (e.startsWith("prod") || e === "production" || e === "live") return "prod";
-  if (e.startsWith("test") || e.startsWith("stag") || e === "qa" || e === "uat") return "test";
+  if (e.startsWith("test") || e.startsWith("stag") || e.startsWith("pre") || e === "qa" || e === "uat") return "test";
   return "dev";
 }
 

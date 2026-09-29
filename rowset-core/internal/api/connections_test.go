@@ -76,3 +76,39 @@ func TestSchemaJSONUsesStableLowercaseIndexFields(t *testing.T) {
 		t.Fatalf("schema JSON leaked legacy Go field names: %s", text)
 	}
 }
+
+// Studio offers three environments and colours them dev, test and prod. The
+// server has to accept all three, and the spellings people bring with them,
+// or a connection cannot be saved with the environment it was given.
+func TestEnvironmentAcceptsTheThreeStudioOffers(t *testing.T) {
+	base := connectionInput{Name: "db", Engine: "postgres", Host: "db", Port: 5432, Password: "secret", ConnectionUsername: "user"}
+	for given, want := range map[string]string{
+		"":               "dev",
+		"dev":            "dev",
+		"development":    "dev",
+		"local":          "dev",
+		"test":           "test",
+		"testing":        "test",
+		"staging":        "test",
+		"stage":          "test",
+		"preprod":        "test",
+		"pre-production": "test",
+		"UAT":            "test",
+		"qa":             "test",
+		"prod":           "prod",
+		"Production":     "prod",
+		"live":           "prod",
+	} {
+		input := base
+		input.Environment = given
+		connection, _, message := normalizeConnectionInput(input, nil, "org")
+		if message != "" || connection.Environment != want {
+			t.Fatalf("environment %q became %q (%q), want %q", given, connection.Environment, message, want)
+		}
+	}
+	input := base
+	input.Environment = "somewhere else"
+	if _, _, message := normalizeConnectionInput(input, nil, "org"); message == "" {
+		t.Fatal("an unknown environment was accepted")
+	}
+}

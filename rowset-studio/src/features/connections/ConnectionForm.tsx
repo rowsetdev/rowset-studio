@@ -276,7 +276,7 @@ export default function ConnectionForm({
           <Field label="Environment">
             <Select value={form.environment} onChange={(e) => set("environment", e.target.value)}>
               <option value="dev">dev</option>
-              <option value="preprod">preprod</option>
+              <option value="test">test / staging</option>
               <option value="prod">prod</option>
             </Select>
           </Field>

@@ -794,14 +794,20 @@ func normalizeConnectionInput(input connectionInput, existing *domain.Connection
 	if input.Database != nil && strings.TrimSpace(*input.Database) != "" {
 		database = strings.TrimSpace(*input.Database)
 	}
+	// Three environments, each with its own colour in Studio: dev, the one
+	// between it and production (staging, pre-production, UAT, QA - stored
+	// as "test"), and production. Common spellings of each are accepted so a
+	// connection imported from elsewhere keeps its meaning.
 	environment := strings.ToLower(strings.TrimSpace(input.Environment))
 	switch environment {
-	case "", "dev", "development", "local", "test":
+	case "", "dev", "development", "local":
 		environment = "dev"
-	case "prod", "production", "prd":
+	case "test", "testing", "stage", "staging", "preprod", "pre-prod", "preproduction", "pre-production", "uat", "qa":
+		environment = "test"
+	case "prod", "production", "prd", "live":
 		environment = "prod"
 	default:
-		return domain.Connection{}, nil, "environment must be dev or prod"
+		return domain.Connection{}, nil, "environment must be dev, test or prod"
 	}
 	alias := input.Alias
 	tlsMode, serverName, caPEM, clientCert, clientKeySecret := engine.TLSVerifyFull, "", "", "", ""
