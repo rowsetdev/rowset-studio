@@ -24,6 +24,7 @@ function WorkspaceHome() {
 
 const ConnectionsPage = lazy(() => import("../features/connections/ConnectionsPage"));
 const EditorPage = lazy(() => import("../features/editor/EditorPage"));
+const ConsolePage = lazy(() => import("../features/console/ConsolePage"));
 const PoliciesPage = lazy(() => import("../features/policies/PoliciesPage"));
 const ActivityPage = lazy(() => import("../features/activity/ActivityPage"));
 const NotebooksPage = lazy(() => import("../features/notebooks/NotebooksPage"));
@@ -46,6 +47,7 @@ export function createRouter() {
       { path: "connections", element: <ConnectionsPage /> },
       { path: "documents", element: <Navigate to="/editor" replace /> },
       { path: "editor", element: <EditorPage /> },
+      { path: "console", element: <ConsolePage /> },
       { path: "activity", element: <ActivityPage /> },
       { path: "notebooks", element: <NotebooksPage /> },
       { path: "schedules", element: <SchedulesPage /> },

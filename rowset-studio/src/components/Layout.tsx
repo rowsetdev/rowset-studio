@@ -62,6 +62,7 @@ export default function ProtectedLayout() {
 const personalGroups: NavGroup[] = [
   { title: "Personal workspace", items: [
     { to: "/editor", label: "Query", icon: "sql" },
+    { to: "/console", label: "Console", icon: "terminal" },
     { to: "/notebooks", label: "Notebooks", icon: "notebook" },
     { to: "/activity", label: "Activity", icon: "activity" },
     { to: "/schedules", label: "Schedules", icon: "clock" },

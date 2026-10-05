@@ -8,6 +8,7 @@ export type IconName =
   | "chevron-down"
   | "chevron-left"
   | "sql"
+  | "terminal"
   | "activity"
   | "shield"
   | "lock"
@@ -63,6 +64,12 @@ const paths: Record<IconName, ReactNode> = {
     <>
       <rect x="2.5" y="3" width="11" height="10" rx="1.5" />
       <path d="M5 6.5h2.5M5 9.5h4M11 6v4" />
+    </>
+  ),
+  terminal: (
+    <>
+      <rect x="2" y="3" width="12" height="10" rx="1.5" />
+      <path d="M4.75 6.5L6.5 8.25 4.75 10M8.25 10.25h3" />
     </>
   ),
   activity: <path d="M2 8h3l1.5 4 3-8L13 8h1" />,

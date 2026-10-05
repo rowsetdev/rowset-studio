@@ -15,18 +15,19 @@ import RunToolbar, { type WorkspaceStatus } from "./RunToolbar";
 import SaveToNotebookDialog from "../notebooks/SaveToNotebookDialog";
 import PlanPanel, { type PlanState } from "../plan/PlanPanel";
 import ExplorerPanel from "./ExplorerPanel";
-import { explainQuery, exportTable, getSchema, listDatabases, runOnConnections, runQuery, beginTxn, txnQuery, commitTxn, rollbackTxn, mongoBeginTxn, mongoCommitTxn, mongoRollbackTxn, mongoUpdate, mongoDelete, mongoTxnUpdate, mongoTxnDelete, type QueryResult, type SchemaInfo } from "./api";
+import { explainQuery, exportTable, getSchema, listDatabases, runOnConnections, runQuery, beginTxn, txnQuery, commitTxn, rollbackTxn, mongoBeginTxn, mongoCommitTxn, mongoRollbackTxn, type QueryResult, type SchemaInfo } from "./api";
+import { runCassandra, runElasticsearch, runMongo, runRedis, type NoSqlRun } from "./nosqlRun";
 import { buildSqlCompletions } from "./sqlCompletions";
 import { useSchema } from "./useEditor";
 import { formatSql, statementAt, splitStatements } from "./sqlText";
 import { useAuth } from "../../lib/auth";
 import { SchemaActions } from "./schemaActions";
-import { mongoQuery, mongoRequest, formatMongoQuery, isMongoAggregateQuery, mongoAggregateRequest, isMongoUpdateQuery, mongoUpdateRequest, isMongoDeleteQuery, mongoDeleteRequest } from "./mongoQuery";
+import { mongoQuery, formatMongoQuery } from "./mongoQuery";
 import MongoQueryBar from "./MongoQueryBar";
 import RedisQueryBar, { redisQuery } from "./RedisQueryBar";
 import ElasticsearchQueryBar, { elasticsearchQuery } from "./ElasticsearchQueryBar";
 import SnippetsMenu from "./SnippetsMenu";
-import { api, ApiError } from "../../lib/api";
+import { ApiError } from "../../lib/api";
 import { useEngineCapabilities } from "../../lib/instance";
 import { rowBackupEnabled } from "../../lib/preferences";
 import { useActiveExtensions, type DenialContext } from "../../app/extensions";
@@ -528,55 +529,8 @@ function EditorWorkspace({ snapshot, initial }: { snapshot: WorkspaceSnapshot; i
     };
     // A restore script puts rows back; backing it up again would only add noise.
     const backup = !skipBackup && !activeTab?.restoreOf && rowBackupEnabled();
-    const backupNotice = (result: { backup?: { id: string; rows: number }; backupSkipped?: string }): string | undefined => {
-      if (result.backup) return `Backed up ${result.backup.rows} document(s); restore from Activity → Row backups.`;
-      if (result.backupSkipped) return `No backup was taken: ${result.backupSkipped}.`;
-      return undefined;
-    };
-    const runMongo = async (): Promise<QueryResult> => {
-      const aggregate = isMongoAggregateQuery(sql);
-      if (!aggregate && isMongoUpdateQuery(sql)) {
-        const request = JSON.parse(mongoUpdateRequest(sql, selectedDb, backup)) as { collection: string; filter: unknown; update: unknown; backup: boolean; database: string };
-        const txnId = transactionIDs[tabId];
-        const response = txnId
-          ? await mongoTxnUpdate(connectionId, txnId, { collection: request.collection, filter: request.filter, update: request.update, backup: request.backup })
-          : await mongoUpdate(connectionId, request);
-        return { columns: ["matchedCount", "modifiedCount"], rows: [[response.matchedCount, response.modifiedCount]], rowCount: 1, durationMs: response.durationMs, policyNotice: backupNotice(response) };
-      }
-      if (!aggregate && isMongoDeleteQuery(sql)) {
-        const request = JSON.parse(mongoDeleteRequest(sql, selectedDb, backup)) as { collection: string; filter: unknown; backup: boolean; database: string };
-        const txnId = transactionIDs[tabId];
-        const response = txnId
-          ? await mongoTxnDelete(connectionId, txnId, { collection: request.collection, filter: request.filter, backup: request.backup })
-          : await mongoDelete(connectionId, request);
-        return { columns: ["deletedCount"], rows: [[response.deletedCount]], rowCount: 1, durationMs: response.durationMs, policyNotice: backupNotice(response) };
-      }
-      const path = aggregate ? "aggregate" : "find";
-      const body = aggregate ? mongoAggregateRequest(sql, selectedDb) : mongoRequest(sql, selectedDb);
-      const response = await api<{ documents: unknown[]; truncated: boolean; durationMs: number; limit: number }>(`/connections/${connectionId}/documents/${path}`, { method: "POST", signal: controller.signal, body });
-      return { columns: ["document"], columnTypes: ["BSON"], rows: response.documents.map(document => [document]), rowCount: response.documents.length, durationMs: response.durationMs, truncated: response.truncated, policyNotice: response.truncated ? `Document limit: ${response.limit}` : undefined };
-    };
-    const runElasticsearch = async (): Promise<QueryResult> => {
-      const response = await api<{ documents: unknown[]; truncated: boolean; aggregations?: unknown; searchAfter?: unknown; durationMs: number; limit: number }>(`/connections/${connectionId}/elasticsearch/search`, { method: "POST", signal: controller.signal, body: sql });
-      // Aggregations and the sort values for the next search_after page have
-      // no column of their own, so they show as one leading pseudo-document.
-      const meta = response.aggregations !== undefined || response.searchAfter !== undefined
-        ? [{ _aggregations: response.aggregations, _searchAfter: response.searchAfter }]
-        : [];
-      const documents = [...meta, ...response.documents];
-      return { columns: ["document"], columnTypes: ["JSON"], rows: documents.map(document => [document]), rowCount: documents.length, durationMs: response.durationMs, truncated: response.truncated, policyNotice: response.truncated ? `Result size: ${response.limit}` : undefined };
-    };
-    const runRedis = async (): Promise<QueryResult> => {
-      const input = JSON.parse(sql) as { pattern?: string; type?: string; limit?: number };
-      const body = JSON.stringify({ database: selectedDb, pattern: input.pattern, type: input.type, limit: input.limit });
-      const response = await api<{ entries: { key: string; type: string; ttl: number; value: unknown }[]; cursor: number; durationMs: number; limit: number }>(`/connections/${connectionId}/redis/scan`, { method: "POST", signal: controller.signal, body });
-      return { columns: ["key", "type", "ttl", "value"], rows: response.entries.map(e => [e.key, e.type, e.ttl, e.value]), rowCount: response.entries.length, durationMs: response.durationMs, truncated: response.cursor !== 0, policyNotice: response.cursor !== 0 ? `Scan limit: ${response.limit}; more keys remain (cursor ${response.cursor})` : undefined };
-    };
-    const runCassandra = async (): Promise<QueryResult> => {
-      const response = await api<{ columns: string[]; rows: unknown[][]; durationMs: number; truncated: boolean; backup?: { id: string; rows: number }; backupSkipped?: string }>(`/connections/${connectionId}/cassandra/query`, { method: "POST", signal: controller.signal, body: JSON.stringify({ keyspace: selectedDb, query: sql, limit: 1000, backup }) });
-      return { columns: response.columns ?? [], rows: response.rows ?? [], rowCount: (response.rows ?? []).length, durationMs: response.durationMs, truncated: response.truncated, policyNotice: backupNotice(response) };
-    };
-    return (isMongo ? runMongo() : isElasticsearch ? runElasticsearch() : isRedis ? runRedis() : isCassandra ? runCassandra() : tx ? txnQuery(tx.connectionId, tx.id, sql, tx.database, controller.signal, progress, backup) : runQuery(connectionId, sql, database, nodeRole, controller.signal, progress, backup))
+    const noSqlRun: NoSqlRun = { connectionId, source: sql, database: selectedDb, backup, signal: controller.signal, txnId: transactionIDs[tabId] };
+    return (isMongo ? runMongo(noSqlRun) : isElasticsearch ? runElasticsearch(noSqlRun) : isRedis ? runRedis(noSqlRun) : isCassandra ? runCassandra(noSqlRun) : tx ? txnQuery(tx.connectionId, tx.id, sql, tx.database, controller.signal, progress, backup) : runQuery(connectionId, sql, database, nodeRole, controller.signal, progress, backup))
       .then((res) => {
         if (runSeq.current[tabId] !== seq) return false;
         patchRun(tabId, {

@@ -18,6 +18,7 @@ interface PaletteItem {
 
 const PAGES: { to: string; label: string; icon: IconName; hint: string }[] = [
   { to: "/editor", label: "Query", icon: "sql", hint: "SQL editor" },
+  { to: "/console", label: "Console", icon: "terminal", hint: "psql, mysql, mongosh and the rest, in the browser" },
   { to: "/notebooks", label: "Notebooks", icon: "notebook", hint: "Markdown + SQL notes" },
   { to: "/schedules", label: "Schedules", icon: "clock", hint: "Scheduled queries" },
   { to: "/schema-compare", label: "Schema comparison", icon: "table", hint: "Compare two schemas" },
