@@ -35,6 +35,12 @@ type backupTarget struct {
 // on one table. Statements that join, use other tables or a WITH clause are
 // not backed up, because the rows they change cannot be selected reliably.
 func backupTargetOf(info sqlguard.Info) (backupTarget, bool) {
+	// A script's token positions point into the statement each came from, not
+	// into the script, so its WHERE cannot be read back out of Raw. Rowset
+	// says a backup was skipped rather than guess at the rows.
+	if info.IsScript {
+		return backupTarget{}, false
+	}
 	if (info.Command != sqlguard.Update && info.Command != sqlguard.Delete) || len(info.Tables) != 1 || !info.HasWhere {
 		return backupTarget{}, false
 	}

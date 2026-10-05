@@ -78,7 +78,54 @@ export function hashComments(engine?: string): boolean {
   return e === "" || e === "mysql" || e === "mariadb";
 }
 
+// SQL Server's batch separator is GO on a line of its own, never the
+// semicolon: sqlcmd and SSMS send everything up to it as one batch, which is
+// what lets a DECLARE and the statements that use its variable belong
+// together. Splitting a T-SQL script on ";" instead cuts it into pieces that
+// cannot see each other's variables, and a maintenance script is exactly that
+// shape - SET, DECLARE, then a loop that uses both.
+function splitTSQLBatches(sql: string): { sql: string; start: number; end: number }[] {
+  const result: { sql: string; start: number; end: number }[] = [];
+  const tokens = sqlTokens(sql, { hashComments: false });
+  let start = 0;
+  const add = (end: number, next: number) => {
+    const part = sql.slice(start, end);
+    if (sqlTokens(part, { hashComments: false }).some((t) => t.kind !== "space" && t.kind !== "comment" && t.text !== ";")) {
+      result.push({ sql: part.trim(), start, end });
+    }
+    start = next;
+  };
+  tokens.forEach((token, index) => {
+    if (token.kind !== "word" || token.text.toUpperCase() !== "GO") return;
+    // GO is the separator only on a line of its own. A column or alias named
+    // "go" has something other than a line break beside it.
+    const before = sql.slice(0, token.start);
+    if (!/(^|\n)[ \t]*$/.test(before)) return;
+    let after = token.end;
+    // sqlcmd allows a repeat count, "GO 5".
+    for (let next = index + 1; next < tokens.length; next++) {
+      const following = tokens[next];
+      if (following.kind === "space" && !following.text.includes("\n")) continue;
+      if (following.kind === "word" && /^\d+$/.test(following.text)) {
+        after = following.end;
+        continue;
+      }
+      break;
+    }
+    // Whatever is left on the separator's line - spaces, a trailing comment -
+    // belongs to the separator, not to the batch that follows it.
+    const rest = /^[ \t]*(--[^\n]*)?/.exec(sql.slice(after));
+    const lineEnd = after + (rest?.[0].length ?? 0);
+    if (!/^(\r?\n|$)/.test(sql.slice(lineEnd))) return;
+    add(token.start, lineEnd);
+  });
+  add(sql.length, sql.length);
+  return result;
+}
+
 export function splitStatements(sql: string, engine?: string): { sql: string; start: number; end: number }[] {
+  const target = (engine ?? "").toLowerCase();
+  if (target === "mssql" || target === "sqlserver") return splitTSQLBatches(sql);
   const result: { sql: string; start: number; end: number }[] = [];
   const hash = hashComments(engine);
   const tokens = sqlTokens(sql, { hashComments: hash });

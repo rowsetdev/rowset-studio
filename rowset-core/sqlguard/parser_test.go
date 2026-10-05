@@ -19,7 +19,9 @@ func TestClassificationIgnoresCommentsAndStrings(t *testing.T) {
 		{"WITH changed AS (UPDATE users SET ok=true RETURNING *) SELECT * FROM changed", Update, false},
 		{"WITH changed AS (UPDATE users SET ok=true WHERE id=1 RETURNING *) SELECT * FROM changed WHERE id=1", Update, true},
 		{"WITH users AS (SELECT * FROM users WHERE id=1) SELECT * FROM users FOR UPDATE", Select, false},
-		{"SELECT 1; DELETE FROM users", Multi, false},
+		// A script takes the riskiest kind in it, so the DELETE decides, and
+		// its missing WHERE is what the guardrail refuses.
+		{"SELECT 1; DELETE FROM users", Delete, false},
 		{"DROP TABLE users", DDL, false},
 	}
 	for _, tt := range tests {
@@ -169,7 +171,7 @@ func TestRoutineBodiesAreOneStatement(t *testing.T) {
 		"CREATE FUNCTION f() RETURNS int LANGUAGE plpgsql AS $$ BEGIN RETURN 1; END $$",
 	} {
 		info, err := Parse(sql)
-		if err != nil || info.Kind == Multi {
+		if err != nil || info.IsScript {
 			t.Fatalf("%q split into several statements: %v %v", sql, info.Kind, err)
 		}
 	}
@@ -178,7 +180,7 @@ func TestRoutineBodiesAreOneStatement(t *testing.T) {
 		"CREATE TABLE function_log (id int); DROP TABLE t",
 		"SELECT 1; SELECT 2",
 	} {
-		if info, _ := Parse(sql); info.Kind != Multi {
+		if info, _ := Parse(sql); !info.IsScript {
 			t.Fatalf("%q was not treated as several statements", sql)
 		}
 	}
@@ -192,8 +194,10 @@ func TestHashCommentIsDialectAware(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", dialect, err)
 		}
-		if info.Kind != Multi {
-			t.Fatalf("%s: hid a second statement behind '#', kind=%s", dialect, info.Kind)
+		// The script is read as one: the DELETE in it decides the kind, and
+		// its missing WHERE is what the guardrail then refuses.
+		if !info.IsScript || info.Kind != Delete || info.HasWhere {
+			t.Fatalf("%s: hid a second statement behind '#', script=%v kind=%s where=%v", dialect, info.IsScript, info.Kind, info.HasWhere)
 		}
 		// The "#>" operator on its own is a single readable statement.
 		single, err := ParseDialect(dialect, "SELECT data #> '{a}' AS v FROM t")
@@ -311,8 +315,9 @@ func TestPrepareStaysUnclassified(t *testing.T) {
 // as a comment it hides whatever it carries from every rule.
 func TestMySQLExecutableCommentsAreSQL(t *testing.T) {
 	hidden, err := ParseDialect(DialectMySQL, "SELECT 1 /*! ; DROP TABLE users */")
-	if err != nil || hidden.Kind != Multi {
-		t.Fatalf("a statement hidden in an executable comment classified as %s (err=%v)", hidden.Kind, err)
+	// Read as one script, the DROP inside it is what the guardrail sees.
+	if err != nil || !hidden.IsScript || !hidden.IsDrop {
+		t.Fatalf("a statement hidden in an executable comment classified as %s script=%v drop=%v (err=%v)", hidden.Kind, hidden.IsScript, hidden.IsDrop, err)
 	}
 	versioned, err := ParseDialect(DialectMySQL, "/*!40001 DELETE FROM users */")
 	if err != nil || versioned.Kind != Delete || len(versioned.Tables) != 1 || versioned.Tables[0].Name != "users" {

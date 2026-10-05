@@ -45,10 +45,11 @@ func (s *Server) explainQuery(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "PARSE_ERROR", err.Error())
 		return
 	}
-	switch info.Kind {
-	case sqlguard.Multi:
+	if info.IsScript {
 		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "Explain one statement at a time")
 		return
+	}
+	switch info.Kind {
 	case sqlguard.Session, sqlguard.Unknown:
 		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "This statement has no execution plan")
 		return

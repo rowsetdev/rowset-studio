@@ -26,7 +26,11 @@ test("routine bodies are not split at their semicolons", () => {
 
 test("'#' is a comment only on MySQL and MariaDB", () => {
   // SQL Server '#temp' tables and PostgreSQL '#>' are not comments.
-  assert.equal(splitStatements("SELECT * INTO #temp FROM orders; SELECT * FROM #temp", "mssql").length, 2);
+  // On SQL Server the batch separator is GO, so "#temp" must not swallow the
+  // rest of the line and hide the batch that follows it.
+  assert.equal(splitStatements("SELECT * INTO #temp FROM orders\nGO\nSELECT * FROM #temp", "mssql").length, 2);
+  // Within one batch the semicolons stay where they were written.
+  assert.equal(splitStatements("SELECT * INTO #temp FROM orders; SELECT * FROM #temp", "mssql").length, 1);
   assert.equal(splitStatements("SELECT a #> b FROM t; SELECT c FROM t", "postgres").length, 2);
   // On MySQL/MariaDB the rest of the line, ';' and all, is a comment.
   assert.equal(splitStatements("SELECT 1 # a ; b\nFROM t", "mysql").length, 1);
@@ -39,4 +43,44 @@ test("'#' is a comment only on MySQL and MariaDB", () => {
 test('Cassandra batch stays one statement through APPLY BATCH', () => {
   const batch = "BEGIN UNLOGGED BATCH\nINSERT INTO items (id) VALUES (1);\nUPDATE items SET name = 'a;b' WHERE id = 2;\nAPPLY BATCH;";
   assert.deepEqual(splitStatements(`${batch}\nSELECT * FROM items;`, 'cassandra').map((item) => item.sql), [batch, 'SELECT * FROM items;']);
+});
+
+test('SQL Server batches split on GO, not on semicolons', () => {
+  const script = [
+    'SET NOCOUNT ON;',
+    '',
+    'DECLARE @BatchSize int = 5000;',
+    '',
+    'WHILE 1 = 1',
+    'BEGIN',
+    '  ;WITH c AS (SELECT TOP (@BatchSize) Id FROM OrderTrade WHERE Id < 400 ORDER BY Id)',
+    '  DELETE FROM c;',
+    'END',
+  ].join('\n');
+  // A DECLARE and the loop that uses its variable belong to one batch; split
+  // on ";" they could not see each other.
+  assert.equal(splitStatements(script, 'mssql').length, 1);
+  assert.equal(splitStatements(script, 'sqlserver').length, 1);
+  // Every other engine still splits on the semicolon.
+  assert.equal(splitStatements(script, 'postgres').length > 1, true);
+
+  assert.deepEqual(splitStatements('SELECT 1\nGO\nSELECT 2\nGO', 'mssql').map(s => s.sql), ['SELECT 1', 'SELECT 2']);
+  // sqlcmd allows a repeat count after GO.
+  assert.deepEqual(splitStatements('SELECT 1\nGO 3\nSELECT 2', 'mssql').map(s => s.sql), ['SELECT 1', 'SELECT 2']);
+  assert.deepEqual(splitStatements('SELECT 1\ngo\t\nSELECT 2', 'mssql').map(s => s.sql), ['SELECT 1', 'SELECT 2']);
+  assert.deepEqual(splitStatements('SELECT 1\nGO -- next batch\nSELECT 2', 'mssql').map(s => s.sql), ['SELECT 1', 'SELECT 2']);
+});
+
+test('GO only separates when it stands alone on its line', () => {
+  // A column, alias or table called "go" is a name, not a separator.
+  assert.equal(splitStatements('SELECT go FROM t WHERE go = 1', 'mssql').length, 1);
+  assert.equal(splitStatements('SELECT 1 AS go', 'mssql').length, 1);
+  assert.equal(splitStatements('SELECT 1 GO', 'mssql').length, 1);
+  assert.equal(splitStatements('SELECT 1\nGO SELECT 2', 'mssql').length, 1);
+  // Inside a string or a comment it is text.
+  assert.equal(splitStatements("SELECT '\nGO\n' AS v", 'mssql').length, 1);
+  assert.equal(splitStatements('SELECT 1 /*\nGO\n*/', 'mssql').length, 1);
+  // A trailing GO leaves no empty batch behind.
+  assert.deepEqual(splitStatements('SELECT 1\nGO\n', 'mssql').map(s => s.sql), ['SELECT 1']);
+  assert.deepEqual(splitStatements('\nGO\n', 'mssql').map(s => s.sql), []);
 });

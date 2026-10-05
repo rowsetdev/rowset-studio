@@ -69,12 +69,22 @@ func (s *Server) executeQuery(w http.ResponseWriter, r *http.Request, connection
 		writeError(w, http.StatusBadRequest, "PARSE_ERROR", parseErr.Error())
 		return
 	}
-	// HTTP requests do not own a persistent database session. Raw COMMIT/BEGIN
-	// could desynchronize a managed transaction or leak session state to the pool.
-	if info.Kind == sqlguard.Session {
-		message := "Session-control SQL is not supported in the web editor. Use Begin/Commit/Rollback and the database selector."
-		s.recordActivity(r, connection.ID, input.SQL, "blocked", 0, 0, "", "", auditMeta{decision: "deny", reason: message, policyID: "web_session_control"})
-		writeError(w, http.StatusBadRequest, "SESSION_CONTROL_UNSUPPORTED", message)
+	// Rowset opens and ends transactions itself, through Begin/Commit/Rollback
+	// and the editor's manual-commit switch. A bare transaction verb would
+	// leave one open on a connection the next request will not get, or end one
+	// Rowset is still managing, so it is refused and the control named.
+	if info.ControlsTransaction {
+		message := "Rowset opens and ends transactions itself. Use Begin, Commit and Rollback, or the editor's manual-commit switch, instead of writing the statement."
+		s.recordActivity(r, connection.ID, input.SQL, "blocked", 0, 0, "", "", auditMeta{decision: "deny", reason: message, policyID: "web_transaction_control"})
+		writeError(w, http.StatusBadRequest, "TRANSACTION_CONTROL_UNSUPPORTED", message)
+		return
+	}
+	// Which database a statement runs against is chosen per request, so a USE
+	// of its own would be forgotten the moment it finished.
+	if info.SwitchesDatabase {
+		message := "Use the database selector to choose a database; a USE statement would be forgotten as soon as it finished."
+		s.recordActivity(r, connection.ID, input.SQL, "blocked", 0, 0, "", "", auditMeta{decision: "deny", reason: message, policyID: "web_database_switch"})
+		writeError(w, http.StatusBadRequest, "DATABASE_SWITCH_UNSUPPORTED", message)
 		return
 	}
 	normalized, queryHash := sqlguard.Normalize(info)
@@ -170,6 +180,20 @@ func (s *Server) executeQuery(w http.ResponseWriter, r *http.Request, connection
 			annotations["node"] = map[string]string{"host": target.Host, "role": resolvedRole}
 		}
 	}
+	// A statement that leaves state behind on its connection - SET, DECLARE,
+	// a cursor, a temporary table - cannot run on a pooled connection, because
+	// whoever got that connection next would inherit the state. It runs on a
+	// session of its own instead, which is discarded when the statement ends.
+	var session *engine.Session
+	if transaction == nil && info.TouchesSession {
+		opened, sessionErr := s.engines.OpenSession(ctx, target)
+		if sessionErr != nil {
+			writeError(w, http.StatusBadGateway, "EXEC_ERROR", sessionErr.Error())
+			return
+		}
+		session = opened
+		defer func() { _ = session.Close() }()
+	}
 	// The rows a simple UPDATE or DELETE changes can be backed up first. On a
 	// shared server only administrators read a backup's script, since it
 	// holds values as stored, before result hooks.
@@ -193,9 +217,12 @@ func (s *Server) executeQuery(w http.ResponseWriter, r *http.Request, connection
 		defer stopStream()
 		var stream *engine.RowStream
 		executionStarted := time.Now()
-		if transaction != nil {
+		switch {
+		case transaction != nil:
 			stream, err = transaction.Query(streamCtx, effectiveSQL)
-		} else {
+		case session != nil:
+			stream, err = session.Query(streamCtx, effectiveSQL)
+		default:
 			stream, err = s.engines.Query(streamCtx, target, effectiveSQL)
 		}
 		if err != nil {
@@ -223,9 +250,12 @@ func (s *Server) executeQuery(w http.ResponseWriter, r *http.Request, connection
 	}
 	var result engine.Result
 	executionStarted := time.Now()
-	if transaction != nil {
+	switch {
+	case transaction != nil:
 		result, err = transaction.Execute(ctx, effectiveSQL, 0)
-	} else {
+	case session != nil:
+		result, err = session.Execute(ctx, effectiveSQL, 0)
+	default:
 		result, err = s.engines.Execute(ctx, target, effectiveSQL, 0)
 	}
 	if err != nil {

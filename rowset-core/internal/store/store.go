@@ -523,6 +523,12 @@ var defaultPolicies = []DefaultPolicy{
 	// in My policies. An installation that serves several people turns it on
 	// when it bootstraps.
 	{Key: "deny_unclassified", Enabled: false},
+	// A script of several statements is read as one carrying the riskiest
+	// statement in it, so the rules above still judge what it does. Blocking
+	// every script would block the batched delete and the reindex people
+	// write by hand, so a personal workspace starts with this off. An
+	// installation several people share turns it on.
+	{Key: "deny_multi_statement", Enabled: false},
 	{Key: "limit_rows", Config: "10000", Enabled: true},
 }
 

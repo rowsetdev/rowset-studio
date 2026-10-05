@@ -186,7 +186,9 @@ func (s *Server) validateScheduled(r *http.Request, identity domain.Identity, in
 	if err != nil {
 		return "", err
 	}
-	if info.Kind != sqlguard.Select {
+	// A schedule exports one result set, and a script has no single one, so
+	// SELECT alone is accepted even though a script of SELECTs now parses.
+	if info.Kind != sqlguard.Select || info.IsScript {
 		return "", errors.New("scheduled queries run one SELECT statement")
 	}
 	if err := input.Schedule.validate(); err != nil {

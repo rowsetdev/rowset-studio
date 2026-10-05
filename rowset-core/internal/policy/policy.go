@@ -51,8 +51,15 @@ func Evaluate(input Input) Decision {
 		return Decision{Effect: Deny, PolicyID: key, Reason: reason, Risk: risk}, true
 	}
 	stmt := input.Statement
-	if stmt.Kind == sqlguard.Multi {
-		return Decision{Effect: Deny, PolicyID: "multi_statement", Reason: "multiple SQL statements are forbidden", Risk: Critical}
+	// A script used to be refused whatever was in it, which refused every
+	// maintenance script too. It is now read as one statement carrying the
+	// riskiest kind and the union of the flags, so the rules below judge what
+	// the script actually does; the rule stays available for a workspace that
+	// would rather allow no script at all.
+	if stmt.IsScript && input.Enabled["deny_multi_statement"] {
+		if d, ok := deny("deny_multi_statement", "running several SQL statements at once is forbidden, and this workspace's policies keep it that way", High); ok {
+			return d
+		}
 	}
 	if stmt.Kind == sqlguard.Unknown {
 		return Decision{Effect: Deny, PolicyID: "unknown_statement", Reason: "unclassifiable SQL is forbidden", Risk: Critical}

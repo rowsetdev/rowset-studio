@@ -16,7 +16,14 @@ func ParseCQL(cql string) (Info, error) {
 		return Info{Kind: Unknown, Raw: raw}, fmt.Errorf("unclassifiable CQL: %w", err)
 	}
 	if tokens[0].Lower != "begin" {
-		return ParseDialect(DialectGeneric, raw)
+		info, err := ParseDialect(DialectGeneric, raw)
+		// CQL has no script: BEGIN BATCH is the only way to send more than one
+		// statement, and it is handled below. Anything else carrying a second
+		// statement is refused rather than read as a batch.
+		if err == nil && info.IsScript {
+			return Info{Kind: Unknown, Raw: raw}, fmt.Errorf("one CQL statement at a time, or a BEGIN BATCH")
+		}
+		return info, err
 	}
 
 	batchToken := 1

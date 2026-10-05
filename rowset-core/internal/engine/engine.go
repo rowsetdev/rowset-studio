@@ -403,6 +403,22 @@ func (s *Session) Rollback() error {
 	return err
 }
 
+// discardConn gives a pinned connection back without returning it to the
+// pool. A session or a manual transaction can leave settings, variables,
+// temporary objects or a cursor behind, and whoever got that connection next
+// would inherit them, so it is reported bad and the pool closes it. Raw closes
+// the Conn itself once it reports that, which is why the error it hands back
+// is the signal rather than a failure.
+func discardConn(conn *sql.Conn) error {
+	if conn == nil {
+		return nil
+	}
+	if err := conn.Raw(func(any) error { return driver.ErrBadConn }); !errors.Is(err, driver.ErrBadConn) {
+		return errors.Join(err, conn.Close())
+	}
+	return nil
+}
+
 func (s *Session) Close() error {
 	if s == nil || s.closed {
 		return nil
@@ -414,7 +430,7 @@ func (s *Session) Close() error {
 		s.tx = nil
 	}
 	s.cancel()
-	return errors.Join(result, s.conn.Close())
+	return errors.Join(result, discardConn(s.conn))
 }
 
 func (m *Manager) Begin(ctx context.Context, connection Connection) (*Transaction, error) {
@@ -667,7 +683,7 @@ func (t *Transaction) close(commit bool) error {
 			result = t.tx.Rollback()
 		}
 		t.cancel()
-		result = errors.Join(result, t.conn.Close())
+		result = errors.Join(result, discardConn(t.conn))
 	})
 	return result
 }

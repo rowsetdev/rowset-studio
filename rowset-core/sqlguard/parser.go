@@ -57,8 +57,25 @@ type Info struct {
 	HasWhere   bool
 	IsDrop     bool
 	IsTruncate bool
-	Raw        string
-	Tokens     []Token
+	// TouchesSession marks a statement that leaves state behind on the
+	// connection it ran on - SET, DECLARE, a cursor, a temporary object - even
+	// when it also changes rows. Such a statement needs a connection of its
+	// own that is discarded afterwards, never a pooled one.
+	TouchesSession bool
+	// ControlsTransaction marks BEGIN/COMMIT/ROLLBACK and the rest of the
+	// transaction verbs standing on their own. Rowset opens and ends
+	// transactions itself, so these are refused rather than run.
+	ControlsTransaction bool
+	// SwitchesDatabase marks a bare USE: the connection a statement runs on is
+	// chosen per request, so switching it inside one would be forgotten.
+	SwitchesDatabase bool
+	// IsScript marks several statements read as one: Kind is then the riskiest
+	// of them and the flags are the union. Token positions no longer line up
+	// with Raw, so anything that reads the statement back out of Raw - the row
+	// backup - must leave a script alone.
+	IsScript bool
+	Raw      string
+	Tokens   []Token
 }
 
 type Token struct {
@@ -126,6 +143,81 @@ func ParseDialect(dialect Dialect, sql string) (Info, error) {
 	return info, err
 }
 
+// scriptRank orders kinds by how much a statement can do, so a script is
+// judged by the riskiest thing in it. Unrecognised SQL outranks even DDL: a
+// script Rowset cannot read in full is judged as one it cannot read, rather
+// than by the statements it happened to understand.
+var scriptRank = map[Kind]int{
+	Session: 0, Select: 1, Insert: 2, Update: 2, Delete: 2, DDL: 3, Other: 4, Unknown: 5,
+}
+
+// mergeScript reads a script of several statements as one Info. Refusing every
+// script outright also refused every maintenance script - the batched delete,
+// the reindex, the SET-and-loop - so each statement is read instead and the
+// script carries the riskiest kind with the union of the flags. A DROP buried
+// in a script therefore still trips the DROP rule, and a DELETE without WHERE
+// still trips that one, which a blanket refusal never had to get right.
+func mergeScript(dialect Dialect, sql string, statements []string) Info {
+	merged := Info{Dialect: dialect, Kind: Session, Command: Session, Raw: sql, IsScript: true}
+	parts := make([]Info, 0, len(statements))
+	for _, statement := range statements {
+		if strings.TrimSpace(statement) == "" {
+			continue
+		}
+		part, err := classifyStatement(dialect, statement)
+		if err != nil {
+			// One statement Rowset cannot read makes the whole script
+			// unreadable; the guardrail decides what to do with that.
+			part.Kind, part.Command = Unknown, Unknown
+		}
+		parts = append(parts, part)
+		if scriptRank[part.Kind] > scriptRank[merged.Kind] {
+			merged.Kind, merged.Command = part.Kind, part.Kind
+		}
+		merged.IsDrop = merged.IsDrop || part.IsDrop
+		merged.IsTruncate = merged.IsTruncate || part.IsTruncate
+		merged.TouchesSession = merged.TouchesSession || part.TouchesSession
+		merged.ControlsTransaction = merged.ControlsTransaction || part.ControlsTransaction
+		merged.SwitchesDatabase = merged.SwitchesDatabase || part.SwitchesDatabase
+		// Normalize fingerprints a statement from its tokens, so a script
+		// keeps them all; the positions inside them no longer point into Raw,
+		// which is what IsScript warns about.
+		merged.Tokens = append(merged.Tokens, part.Tokens...)
+	}
+	if len(parts) == 0 {
+		merged.Kind, merged.Command = Unknown, Unknown
+		return merged
+	}
+	// A WHERE only counts when every statement of the deciding kind has one:
+	// "DELETE FROM a; DELETE FROM b WHERE id = 1" must still trip the rule
+	// against a DELETE without WHERE.
+	merged.HasWhere = true
+	deciding := 0
+	for _, part := range parts {
+		if part.Kind != merged.Kind {
+			continue
+		}
+		deciding++
+		if !part.HasWhere {
+			merged.HasWhere = false
+		}
+	}
+	if deciding == 0 {
+		merged.HasWhere = false
+	}
+	seen := map[TableRef]bool{}
+	for _, part := range parts {
+		for _, table := range part.Tables {
+			if seen[table] {
+				continue
+			}
+			seen[table] = true
+			merged.Tables = append(merged.Tables, table)
+		}
+	}
+	return merged
+}
+
 func parseDialect(dialect Dialect, sql string) (Info, error) {
 	statements, err := splitStatements(dialect, sql)
 	if err != nil {
@@ -135,9 +227,15 @@ func parseDialect(dialect Dialect, sql string) (Info, error) {
 		return Info{Dialect: dialect, Kind: Unknown, Raw: sql}, fmt.Errorf("empty SQL")
 	}
 	if len(statements) != 1 {
-		return Info{Dialect: dialect, Kind: Multi, Raw: sql}, nil
+		return mergeScript(dialect, sql, statements), nil
 	}
-	raw := strings.TrimSpace(statements[0])
+	return classifyStatement(dialect, statements[0])
+}
+
+// classifyStatement reads one statement. parseDialect has already split the
+// text, so whatever arrives here is a single statement.
+func classifyStatement(dialect Dialect, statement string) (Info, error) {
+	raw := strings.TrimSpace(statement)
 	tokens, err := LexDialect(dialect, raw)
 	if err != nil || len(tokens) == 0 {
 		return Info{Dialect: dialect, Kind: Unknown, Raw: raw}, fmt.Errorf("unclassifiable SQL: %w", err)
@@ -217,6 +315,7 @@ func parseDialect(dialect Dialect, sql string) (Info, error) {
 	} else if info.HasWhere && info.Kind == Select && whereIsTautology(tokens) {
 		info.HasWhere = false
 	}
+	markSessionEffects(&info)
 	info.Tables = extractTables(tokens)
 	if writesOnlyToATableVariable(info) {
 		info.Kind = Session
@@ -504,6 +603,76 @@ func explainRuns(tokens []Token) bool {
 		}
 	}
 	return false
+}
+
+// sessionStateVerbs name the statements whose whole effect is state left
+// behind on the connection: a setting, a variable, a cursor, a message, a
+// pause. They count only as a statement's own opening verb - SET also opens
+// the assignment list of every UPDATE, which leaves nothing behind.
+var sessionStateVerbs = map[string]bool{
+	"set": true, "declare": true, "open": true, "close": true, "deallocate": true,
+	"fetch": true, "print": true, "raiserror": true, "throw": true, "waitfor": true,
+	"listen": true, "unlisten": true, "prepare": true, "discard": true, "reset": true,
+}
+
+// transactionVerbs name the statements that end a transaction or mark a point
+// inside one.
+var transactionVerbs = map[string]bool{
+	"commit": true, "rollback": true, "savepoint": true, "release": true,
+}
+
+// markSessionEffects records what a statement needs from the connection it
+// runs on, which is a separate question from how risky it is: a maintenance
+// script can both change rows and leave a variable behind, so these are flags
+// rather than a kind.
+func markSessionEffects(info *Info) {
+	if len(info.Tokens) == 0 {
+		return
+	}
+	first := info.Tokens[0]
+	if first.Quoted {
+		return
+	}
+	switch {
+	case transactionVerbs[first.Lower]:
+		info.ControlsTransaction = true
+	case first.Lower == "start" || first.Lower == "begin":
+		// START TRANSACTION and BEGIN TRANSACTION, and a bare BEGIN, which
+		// opens a transaction on PostgreSQL and MySQL. BEGIN TRY and a
+		// BEGIN … END block wrap statements of their own and are not control.
+		switch next := nextLower(info.Tokens, 0); next {
+		case "transaction", "tran", "work", "":
+			info.ControlsTransaction = true
+		case "isolation", "deferrable", "read", "not":
+			// BEGIN ISOLATION LEVEL …, BEGIN READ WRITE: still a transaction.
+			info.ControlsTransaction = true
+		}
+	case first.Lower == "use":
+		info.SwitchesDatabase = true
+	}
+	if sessionStateVerbs[first.Lower] {
+		info.TouchesSession = true
+		return
+	}
+	for index, token := range info.Tokens {
+		if token.Quoted {
+			continue
+		}
+		// A temporary table outlives the statement that created it exactly as
+		// a variable does, so it needs the same connection of its own. On SQL
+		// Server its name carries the # itself; elsewhere the keyword says so.
+		if strings.HasPrefix(token.Lower, "#") {
+			info.TouchesSession = true
+			return
+		}
+		if (token.Lower == "temporary" || token.Lower == "temp") && index > 0 {
+			switch info.Tokens[0].Lower {
+			case "create", "drop", "declare":
+				info.TouchesSession = true
+				return
+			}
+		}
+	}
 }
 
 // classifyBlock gives a T-SQL block or control-flow statement the kind of the
