@@ -5,6 +5,18 @@ and `scripts/package-macos.sh` stamp it into Studio (sidebar), the `rowset`
 executable and the macOS app. Every change set bumps the patch version and adds
 an entry here; after x.y.99 the next version is x.(y+1).0.
 
+## 0.1.7 — 2026-10-05
+
+- Fixed: a batch that returns several results showed only the first. SQL
+  Server runs everything up to `GO` as one batch, so a script of several
+  SELECTs is one statement to the server and returns a result per SELECT;
+  0.1.6 read the first and stopped, which lost the rest of what had already
+  run. Every result now arrives, each with its own columns, and the editor
+  lists them as Result 1, Result 2 and so on, the way a run of separate
+  statements already did. A statement inside the batch that changed rows
+  rather than returning them is passed over rather than shown as an empty
+  result.
+
 ## 0.1.6 — 2026-10-05
 
 - Fixed: a maintenance script no longer has to be rewritten to run. SQL that

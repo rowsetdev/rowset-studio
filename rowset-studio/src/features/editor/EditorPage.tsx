@@ -533,15 +533,24 @@ function EditorWorkspace({ snapshot, initial }: { snapshot: WorkspaceSnapshot; i
     return (isMongo ? runMongo(noSqlRun) : isElasticsearch ? runElasticsearch(noSqlRun) : isRedis ? runRedis(noSqlRun) : isCassandra ? runCassandra(noSqlRun) : tx ? txnQuery(tx.connectionId, tx.id, sql, tx.database, controller.signal, progress, backup) : runQuery(connectionId, sql, database, nodeRole, controller.signal, progress, backup))
       .then((res) => {
         if (runSeq.current[tabId] !== seq) return false;
+        // SQL Server runs everything up to GO as one batch, so one run can
+        // return a result per SELECT in it. Each becomes a result of its own,
+        // the way the statement-by-statement run already shows them.
+        const sets = res.more?.length ? [res, ...res.more] : null;
+        const rows = sets ? sets.reduce((total, set) => total + set.rowCount, 0) : res.rowCount;
+        const message = sets
+          ? `${sets.length} results, ${rows} row(s) in total.${backupNote(res)}`
+          : `Query returned ${res.rowCount} row(s).${backupNote(res)}`;
         patchRun(tabId, {
           status: "success",
           data: res,
           error: undefined,
           endedAt: Date.now(),
-          message: `Query returned ${res.rowCount} row(s).${backupNote(res)}`,
+          message,
           messageError: false,
+          ...(sets ? { results: sets.map(set => ({ sql, status: "success" as const, data: set, message })), activeResult: 0 } : {}),
         });
-        lastOutcome.current[tabId] = { status: "success", data: res, message: `Query returned ${res.rowCount} row(s).${backupNote(res)}` };
+        lastOutcome.current[tabId] = { status: "success", data: res, message };
         if (tx) setPendingStatements(current => ({ ...current, [tabId]: (current[tabId] ?? 0) + 1 }));
         if (/\b(create|alter|drop|truncate)\b/i.test(sql)) void queryClient.invalidateQueries({ queryKey: ["schema", connectionId] });
         return true;

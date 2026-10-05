@@ -99,6 +99,37 @@ func (s *RowStream) NextRaw() ([]any, bool, error) {
 	return values, true, nil
 }
 
+// NextResultSet moves to the next result a batch produced. One statement
+// returns one result; a batch of several SELECTs returns one each, and a
+// client that stopped at the first would show only part of what it ran.
+// Column names, types and origins are re-read for the new result; origins are
+// dropped, because they are resolved from the statement the stream was opened
+// with and no longer describe what is being read.
+func (s *RowStream) NextResultSet() (bool, error) {
+	if !s.rows.NextResultSet() {
+		return false, s.rows.Err()
+	}
+	columns, err := s.rows.Columns()
+	if err != nil {
+		return false, err
+	}
+	// A statement that changed rows instead of returning them has no columns
+	// of its own; it is not a result to show, so skip past it.
+	if len(columns) == 0 {
+		return s.NextResultSet()
+	}
+	types := make([]string, len(columns))
+	if columnTypes, err := s.rows.ColumnTypes(); err == nil {
+		for index, columnType := range columnTypes {
+			if index < len(types) {
+				types[index] = strings.ToUpper(columnType.DatabaseTypeName())
+			}
+		}
+	}
+	s.columns, s.types, s.origins = columns, types, make([]domain.ColumnOrigin, len(columns))
+	return true, nil
+}
+
 type Column struct {
 	Schema, Table, Name, DataType string
 	Nullable, PrimaryKey          bool

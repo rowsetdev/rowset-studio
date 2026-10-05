@@ -14,6 +14,12 @@ export interface QueryResult {
   columnOrigins?: ({ schema: string; table: string; column: string } | null)[];
   /** Fields the server added on behalf of its extensions. */
   annotations?: Record<string, unknown>;
+  /**
+   * The results a batch returned after the first. A single statement has
+   * none; a batch of several SELECTs - which SQL Server runs as one - has one
+   * per SELECT, and the editor shows each as a result of its own.
+   */
+  more?: QueryResult[];
 }
 
 export interface HistoryItem {
@@ -92,6 +98,7 @@ function normalizeResult(r: RawQueryResponse): QueryResult {
     columnTypes: r.columnTypes,
     columnOrigins: r.columnOrigins ?? undefined,
     annotations: resultAnnotations(r as unknown as Record<string, unknown>),
+    more: r.more,
   };
 }
 
