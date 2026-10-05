@@ -8,6 +8,8 @@ import SqlCode from "./SqlCode";
 import { colorizeJson } from "./monacoSetup";
 import { resultCSV, resultJSON } from "./resultExport";
 import { filteredIndexes, type ResultFilter, type FilterOperator } from "./resultFilter";
+import { autoColumnWidths, densities, formatXml, isXmlColumn, type GridDensity } from "./gridLayout";
+import { gridDensity, setGridDensity } from "../../lib/preferences";
 import { sortRowIndexes } from "./resultSort";
 
 // Renders a query result set. Values are rendered as text; NULL is shown
@@ -28,6 +30,9 @@ function cellText(value: unknown) {
 
 export default function ResultsGrid({ result, editing, engine, onFilteredCount }: { result: QueryResult; editing?: ResultEditing; engine?: string; onFilteredCount?: (shown: number, total: number) => void }) {
   const [filters, setFilters] = useState<ResultFilter[]>([]);
+  // How tightly the grid packs its rows and columns, remembered per browser.
+  const [density, setDensity] = useState<GridDensity>(() => gridDensity());
+  const chooseDensity = (next: GridDensity) => { setDensity(next); setGridDensity(next); };
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
   // The filter value input stays instantly responsive (it's just what's
   // shown in the box), but the actual scan - a full pass over every loaded
@@ -162,6 +167,16 @@ export default function ResultsGrid({ result, editing, engine, onFilteredCount }
           Filter{filters.length ? ` (${filters.length})` : ""}
         </button>
         <div className="ml-auto flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => chooseDensity(density === "compact" ? "comfortable" : "compact")}
+            title={density === "compact" ? "Compact rows: more columns and rows fit on screen. Click for roomier rows that also show each column's type." : "Roomier rows, with each column's type beside its name. Click for compact rows that fit more on screen."}
+            aria-pressed={density === "compact"}
+            className="flex h-6 items-center gap-1 rounded border border-slate-200 bg-white px-2 font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+          >
+            <Icon name={density === "compact" ? "grid" : "text"} size={12} />
+            {density === "compact" ? "Compact" : "Roomy"}
+          </button>
           <ExportButton result={visibleResult} kind="csv" />
           <ExportButton result={visibleResult} kind="json" />
         </div>
@@ -199,7 +214,7 @@ export default function ResultsGrid({ result, editing, engine, onFilteredCount }
       </div>}
       <div className="min-h-0 flex-1 overflow-auto">
         {view === "grid" ? (
-          <GridView result={result} indexes={indexes} filterKey={filters} editable={editMode ? target : null} edits={edits} onEdit={setCell} drafts={drafts} onDraftEdit={setDraftCell} deletions={deletions} onToggleDelete={toggleDeletion} />
+          <GridView result={result} indexes={indexes} filterKey={filters} density={density} editable={editMode ? target : null} edits={edits} onEdit={setCell} drafts={drafts} onDraftEdit={setDraftCell} deletions={deletions} onToggleDelete={toggleDeletion} />
         ) : view === "text" ? <TextView result={visibleResult} /> : <JsonView result={visibleResult} />}
       </div>
       {reviewing && editing && (
@@ -222,17 +237,26 @@ export default function ResultsGrid({ result, editing, engine, onFilteredCount }
   );
 }
 
-function GridView({ result, indexes, filterKey, editable, edits, onEdit, drafts = [], onDraftEdit, deletions, onToggleDelete }: { result: QueryResult; indexes: number[]; filterKey: ResultFilter[]; editable?: EditTarget | null; edits?: CellEdits; onEdit?: (row: number, column: number, value: string | null) => void; drafts?: Map<number, string | null>[]; onDraftEdit?: (draft: number, column: number, value: string | null) => void; deletions?: Set<number>; onToggleDelete?: (row: number) => void }) {
+function GridView({ result, indexes, filterKey, density, editable, edits, onEdit, drafts = [], onDraftEdit, deletions, onToggleDelete }: { result: QueryResult; indexes: number[]; filterKey: ResultFilter[]; density: GridDensity; editable?: EditTarget | null; edits?: CellEdits; onEdit?: (row: number, column: number, value: string | null) => void; drafts?: Map<number, string | null>[]; onDraftEdit?: (draft: number, column: number, value: string | null) => void; deletions?: Set<number>; onToggleDelete?: (row: number) => void }) {
   const [editingCell, setEditingCell] = useState<{ row: number; column: number; text: string } | null>(null);
   const Mark = useActiveExtensions().find((item) => item.columnMark)?.columnMark;
   const [cellView, setCellView] = useState<{ column: string; value: unknown } | null>(null);
   const [copyState, setCopyState] = useState("");
+  const metrics = densities[density];
   const [widths, setWidths] = useState<Record<number, number>>({});
+  // A column is as wide as what it holds. Giving every column the same
+  // generous width is what made this grid show a third of the columns a
+  // database client shows on the same screen.
+  const autoWidths = useMemo(
+    () => autoColumnWidths(result.columns, result.rows, result.columnTypes, density),
+    [result.columns, result.rows, result.columnTypes, density],
+  );
+  const columnWidth = (index: number) => widths[index] ?? autoWidths[index] ?? 120;
   const [sort, setSort] = useState<{ col: number; dir: "asc" | "desc" } | null>(null);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(480);
-  const rowHeight = 32;
+  const rowHeight = metrics.rowHeight;
   const overscan = 16;
 
   function toggleSort(col: number) {
@@ -274,27 +298,27 @@ function GridView({ result, indexes, filterKey, editable, edits, onEdit, drafts 
       <table className="min-w-full text-left text-xs">
         <thead className="sticky top-0 z-10 bg-[#f3f4f6] text-slate-500 dark:bg-slate-900 dark:text-slate-400">
           <tr>
-            <th className="w-12 border-b border-r border-slate-200 px-2 py-1.5 font-medium dark:border-slate-800">#</th>
+            <th className={`w-10 border-b border-r border-slate-200 ${metrics.cellPadding} font-medium dark:border-slate-800`}>#</th>
             {result.columns.map((c, ci) => {
               const active = sort?.col === ci;
               return (
                 <th
                   key={`${ci}:${c}`}
                   onClick={() => toggleSort(ci)}
-                  className="cursor-pointer select-none whitespace-nowrap border-b border-r border-slate-200 px-2 py-1.5 font-medium hover:bg-slate-200/50 dark:border-slate-800 dark:hover:bg-slate-800/50"
-                  title="Sort by this column"
-                  style={{ minWidth: widths[ci] ?? 120, width: widths[ci] }}
+                  className={`group cursor-pointer select-none whitespace-nowrap border-b border-r border-slate-200 ${metrics.cellPadding} font-medium hover:bg-slate-200/50 dark:border-slate-800 dark:hover:bg-slate-800/50`}
+                  title={result.columnTypes?.[ci] ? `${c} (${result.columnTypes[ci]}) — sort by this column` : `Sort by this column`}
+                  style={{ minWidth: columnWidth(ci), width: columnWidth(ci) }}
                 >
                   <div className="flex items-center gap-1.5">
                     {Mark && <Mark result={result} column={c} />}
-                    <span className="text-slate-700 dark:text-slate-200">
+                    <span className="overflow-hidden text-ellipsis text-slate-700 dark:text-slate-200">
                       {c}
                     </span>
-                    {result.columnTypes?.[ci] && <span className="text-[10px] font-normal text-slate-400">{result.columnTypes[ci]}</span>}
+                    {metrics.showTypes && result.columnTypes?.[ci] && <span className="text-[10px] font-normal text-slate-400">{result.columnTypes[ci]}</span>}
                     <Icon
                       name={active ? "chevron-down" : "sort"}
                       size={11}
-                      className={`transition ${active ? "text-brand-500" : "text-slate-300 dark:text-slate-600"} ${active && sort?.dir === "asc" ? "rotate-180" : ""}`}
+                      className={`transition ${active ? "text-brand-500" : "text-slate-300 opacity-0 group-hover:opacity-100 dark:text-slate-600"} ${active && sort?.dir === "asc" ? "rotate-180" : ""}`}
                     />
                     <span role="separator" aria-label={`Resize ${c}`} className="-mr-2 ml-auto h-5 w-2 shrink-0 cursor-col-resize border-r-2 border-transparent hover:border-slate-400 dark:hover:border-slate-500" onClick={event => event.stopPropagation()} onPointerDown={event => {
                       event.preventDefault(); event.stopPropagation();
@@ -320,7 +344,7 @@ function GridView({ result, indexes, filterKey, editable, edits, onEdit, drafts 
             const rowEdits = edits?.get(rowIndex);
             return (
               <tr key={rowIndex} style={{ height: rowHeight }} className={`hover:bg-slate-50 dark:hover:bg-slate-900 ${deletions?.has(rowIndex) ? "bg-rose-50 line-through decoration-rose-400 dark:bg-rose-500/10" : ""}`}>
-                <td className="whitespace-nowrap border-r border-slate-100 px-2 py-1.5 text-slate-400 dark:border-slate-800 dark:text-slate-500">
+                <td className={`whitespace-nowrap border-r border-slate-100 ${metrics.cellPadding} text-slate-400 dark:border-slate-800 dark:text-slate-500`}>
                   {editable && onToggleDelete ? (
                     <button
                       type="button"
@@ -346,8 +370,8 @@ function GridView({ result, indexes, filterKey, editable, edits, onEdit, drafts 
                         if (canEdit) { setEditingCell({ row: rowIndex, column: j, text: cellText(shown) }); return; }
                         setCopyState(""); setCellView({ column: result.columns[j], value: cell });
                       }}
-                      style={{ maxWidth: widths[j] ?? 480 }}
-                      className={`overflow-hidden text-ellipsis whitespace-nowrap border-r border-slate-100 px-2 py-1.5 text-slate-700 dark:border-slate-800 dark:text-slate-200 ${changed ? "bg-amber-50 dark:bg-amber-500/10" : ""}`}
+                      style={{ maxWidth: columnWidth(j) }}
+                      className={`overflow-hidden text-ellipsis whitespace-nowrap border-r border-slate-100 ${metrics.cellPadding} text-slate-700 dark:border-slate-800 dark:text-slate-200 ${changed ? "bg-amber-50 dark:bg-amber-500/10" : ""}`}
                     >
                       {inEdit ? (
                         <span className="flex items-center gap-1">
@@ -361,6 +385,15 @@ function GridView({ result, indexes, filterKey, editable, edits, onEdit, drafts 
                           />
                           <button type="button" title="Set NULL" onMouseDown={(event) => { event.preventDefault(); commit(null); }} className="rounded border border-slate-300 px-1 text-[10px] text-slate-500 dark:border-slate-600">NULL</button>
                         </span>
+                      ) : isXmlColumn(result.columnTypes?.[j], cell) && shown != null ? (
+                        <button
+                          type="button"
+                          onClick={() => { setCopyState(""); setCellView({ column: result.columns[j], value: cell }); }}
+                          className="w-full truncate text-left text-sky-700 underline decoration-sky-300 underline-offset-2 hover:decoration-sky-600 dark:text-sky-300 dark:decoration-sky-700"
+                          title="Open this XML"
+                        >
+                          {cellText(shown)}
+                        </button>
                       ) : renderCell(shown)}
                     </td>
                   );
@@ -377,7 +410,7 @@ function GridView({ result, indexes, filterKey, editable, edits, onEdit, drafts 
             const key = -1 - draftIndex;
             return (
               <tr key={key} style={{ height: rowHeight }} className="bg-emerald-50/60 dark:bg-emerald-500/10">
-                <td className="whitespace-nowrap border-r border-slate-100 px-2 py-1.5 text-[10px] font-medium uppercase text-emerald-700 dark:border-slate-800 dark:text-emerald-300">new</td>
+                <td className={`whitespace-nowrap border-r border-slate-100 ${metrics.cellPadding} text-[10px] font-medium uppercase text-emerald-700 dark:border-slate-800 dark:text-emerald-300`}>new</td>
                 {result.columns.map((_, j) => {
                   const canEdit = Boolean(editable && editable.columns[j]);
                   const value = draft.get(j);
@@ -388,8 +421,8 @@ function GridView({ result, indexes, filterKey, editable, edits, onEdit, drafts 
                       key={j}
                       title={canEdit ? "Double-click to type a value; columns left empty keep their default" : "This column cannot be written"}
                       onDoubleClick={() => canEdit && setEditingCell({ row: key, column: j, text: value ?? "" })}
-                      style={{ maxWidth: widths[j] ?? 480 }}
-                      className="overflow-hidden text-ellipsis whitespace-nowrap border-r border-slate-100 px-2 py-1.5 text-slate-700 dark:border-slate-800 dark:text-slate-200"
+                      style={{ maxWidth: columnWidth(j) }}
+                      className={`overflow-hidden text-ellipsis whitespace-nowrap border-r border-slate-100 ${metrics.cellPadding} text-slate-700 dark:border-slate-800 dark:text-slate-200`}
                     >
                       {inEdit ? (
                         <span className="flex items-center gap-1">
@@ -416,8 +449,8 @@ function GridView({ result, indexes, filterKey, editable, edits, onEdit, drafts 
     {cellView && <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-6" role="presentation" onClick={() => setCellView(null)}>
       <div role="dialog" aria-modal="true" aria-label={`Cell ${cellView.column}`} className="w-full max-w-3xl space-y-3 rounded-lg bg-white p-5 dark:bg-slate-900" onClick={e => e.stopPropagation()}>
         <div className="flex justify-between"><strong>{cellView.column}</strong><button onClick={() => setCellView(null)}>Close</button></div>
-        <textarea readOnly className="h-80 w-full rounded border bg-transparent p-2 font-mono text-xs" value={cellView.value == null ? "NULL" : typeof cellView.value === "object" ? JSON.stringify(cellView.value, null, 2) : String(cellView.value)} />
-        <button className="rounded border px-3 py-1" onClick={() => { const value = cellView.value == null ? "NULL" : typeof cellView.value === "object" ? JSON.stringify(cellView.value, null, 2) : String(cellView.value); void navigator.clipboard.writeText(value).then(() => setCopyState("Copied"), () => setCopyState("Clipboard unavailable; select and copy the text above.")); }}>Copy value</button>
+        <textarea readOnly className="h-80 w-full rounded border bg-transparent p-2 font-mono text-xs" value={cellViewText(cellView.value)} />
+        <button className="rounded border px-3 py-1" onClick={() => { void navigator.clipboard.writeText(cellViewText(cellView.value)).then(() => setCopyState("Copied"), () => setCopyState("Clipboard unavailable; select and copy the text above.")); }}>Copy value</button>
         <span role="status" className="ml-3 text-xs">{copyState}</span>
       </div>
     </div>}
@@ -515,6 +548,15 @@ function downloadResult(result: QueryResult, kind: "csv" | "json") {
   a.download = `rowset-results-${Date.now()}.${kind}`;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+// What an inspected cell reads as: JSON and XML are laid out rather than
+// shown on the single line they were stored as.
+function cellViewText(value: unknown): string {
+  if (value == null) return "NULL";
+  if (typeof value === "object") return JSON.stringify(value, null, 2);
+  const text = String(value);
+  return isXmlColumn(undefined, text) ? formatXml(text) : text;
 }
 
 function renderCell(v: unknown) {
