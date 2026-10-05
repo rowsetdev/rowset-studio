@@ -5,6 +5,52 @@ and `scripts/package-macos.sh` stamp it into Studio (sidebar), the `rowset`
 executable and the macOS app. Every change set bumps the patch version and adds
 an entry here; after x.y.99 the next version is x.(y+1).0.
 
+## 0.1.6 — 2026-10-05
+
+- Fixed: a maintenance script no longer has to be rewritten to run. SQL that
+  leaves state on its connection - `SET`, `DECLARE`, a cursor, `PRINT`,
+  `RAISERROR`, `WAITFOR`, a temporary table - was refused outright with
+  "Session-control SQL is not supported in the web editor". It now runs, on a
+  connection of its own that is discarded afterwards, so no setting or
+  variable can reach the next request through the pool. A manual transaction's
+  connection is discarded the same way. `BEGIN`, `COMMIT`, `ROLLBACK`,
+  `SAVEPOINT` and a bare `USE` are still refused, and now say which control
+  does the job instead of naming the whole category.
+- Changed: several statements sent together are read as one rather than
+  refused whatever they contain. The script takes the riskiest statement's
+  kind and the union of its flags, so a `DROP` or a `DELETE` without a `WHERE`
+  buried in a script is refused by the rules that already existed - which a
+  blanket refusal never had to get right - while the batched delete and the
+  reindex people write by hand now run. `deny_multi_statement` in My policies
+  brings the old behaviour back; an installation several people share keeps
+  it on. A script is not backed up row by row and has no execution plan, and
+  both say so.
+- Changed: on SQL Server the editor splits a script on `GO`, the batch
+  separator sqlcmd and SSMS use, instead of on every semicolon. A `DECLARE`
+  and the statements that use its variable now belong to one batch. Every
+  other engine still splits on the semicolon.
+- Changed: a result grid shows about twice as many columns on the same screen.
+  Each column is now measured from what it holds instead of being given the
+  same width, rows are tighter, and the column type moves into the header's
+  tooltip. The Compact/Roomy control in the result toolbar brings the roomier
+  rows and the visible types back, and remembers which was chosen.
+- Added: an XML value is shown as a link, as it is in SQL Server's own client,
+  and opens laid out one element per line instead of as a single long line.
+
+- Added: Console, a shell for every engine Rowset connects to, next to Query
+  in the sidebar. It is modelled on the client each engine's users already
+  know - psql, mysql, sqlcmd, sqlite3, duckdb, clickhouse-client, mongosh,
+  redis-cli, cqlsh and the Kibana console - so `\dt`, `.tables`,
+  `show collections`, `DESCRIBE TABLES`, `use`, `\x`, `\timing` and `\G`
+  behave as they do there, with aligned columns, NULL shown explicitly and a
+  colour per value kind. It is a client over the same API the Query editor
+  uses, not a terminal: no process is started and nothing connects to a
+  database directly, so a statement typed in the console gets the same policy
+  decision, row backup and audit entry as one run from the editor. Commands
+  that would need a shell or the local filesystem (`\!`, `\i`, `\copy`) are
+  not offered rather than silently ignored, and an engine Rowset has no shell
+  for says so instead of presenting an empty prompt.
+
 ## 0.1.5 — 2026-09-29
 
 - Fixed: a connection could not be saved with the middle environment. Studio
