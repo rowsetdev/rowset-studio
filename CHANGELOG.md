@@ -5,6 +5,16 @@ and `scripts/package-macos.sh` stamp it into Studio (sidebar), the `rowset`
 executable and the macOS app. Every change set bumps the patch version and adds
 an entry here; after x.y.99 the next version is x.(y+1).0.
 
+## 0.1.8 — 2026-10-06
+
+- Fixed: a script's token positions pointed into the statements it was made
+  of rather than into the script, so anything that reads a statement back out
+  of its own text by position would have sliced the wrong text, silently. The
+  whole script is lexed instead, and a test holds every token to the text it
+  claims. Nothing in Studio was affected - the row backup leaves a script
+  alone - but `sqlguard.Info` is a public contract, and a plugin that rewrites
+  statements reads exactly those positions.
+
 ## 0.1.7 — 2026-10-05
 
 - Fixed: a batch that returns several results showed only the first. SQL

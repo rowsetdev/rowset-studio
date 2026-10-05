@@ -70,9 +70,9 @@ type Info struct {
 	// chosen per request, so switching it inside one would be forgotten.
 	SwitchesDatabase bool
 	// IsScript marks several statements read as one: Kind is then the riskiest
-	// of them and the flags are the union. Token positions no longer line up
-	// with Raw, so anything that reads the statement back out of Raw - the row
-	// backup - must leave a script alone.
+	// of them, the flags are the union, and Tokens covers the whole script.
+	// A caller that rewrites or reads back one statement needs to know it was
+	// handed several.
 	IsScript bool
 	Raw      string
 	Tokens   []Token
@@ -179,14 +179,19 @@ func mergeScript(dialect Dialect, sql string, statements []string) Info {
 		merged.TouchesSession = merged.TouchesSession || part.TouchesSession
 		merged.ControlsTransaction = merged.ControlsTransaction || part.ControlsTransaction
 		merged.SwitchesDatabase = merged.SwitchesDatabase || part.SwitchesDatabase
-		// Normalize fingerprints a statement from its tokens, so a script
-		// keeps them all; the positions inside them no longer point into Raw,
-		// which is what IsScript warns about.
-		merged.Tokens = append(merged.Tokens, part.Tokens...)
+
 	}
 	if len(parts) == 0 {
 		merged.Kind, merged.Command = Unknown, Unknown
 		return merged
+	}
+	// The script's own tokens, not the statements' concatenated: a caller that
+	// reads a statement back out of Raw by token position - the row backup
+	// here, statement rewriting in a plugin - would otherwise slice the wrong
+	// text, silently. Lexing the whole script keeps every position pointing
+	// where it says it does, and gives Normalize something to fingerprint.
+	if tokens, err := LexDialect(dialect, sql); err == nil {
+		merged.Tokens = tokens
 	}
 	// A WHERE only counts when every statement of the deciding kind has one:
 	// "DELETE FROM a; DELETE FROM b WHERE id = 1" must still trip the rule

@@ -107,3 +107,34 @@ func TestScriptsAreFingerprinted(t *testing.T) {
 		t.Errorf("scripts against different tables share a fingerprint")
 	}
 }
+
+// A script's token positions must point into the script itself. Anything that
+// reads a statement back out of Raw by position - the row backup here,
+// statement rewriting in a plugin - would otherwise slice the wrong text, and
+// would do it silently.
+func TestScriptTokenPositionsPointIntoItsOwnText(t *testing.T) {
+	for _, sql := range []string{
+		"SELECT 1; DELETE FROM orders WHERE id = 1",
+		"SET NOCOUNT ON;\n\nSELECT name FROM sys.tables;\nSELECT 2",
+		"SELECT 'a; b' AS q; SELECT 2",
+	} {
+		info, err := sqlguard.ParseDialect(sqlguard.DialectMSSQL, sql)
+		if err != nil {
+			t.Fatalf("%q: %v", sql, err)
+		}
+		if !info.IsScript {
+			t.Fatalf("%q was not read as a script", sql)
+		}
+		if len(info.Tokens) == 0 {
+			t.Fatalf("%q has no tokens", sql)
+		}
+		for _, token := range info.Tokens {
+			if token.Start < 0 || token.End > len(info.Raw) || token.Start > token.End {
+				t.Fatalf("%q: token %q spans [%d,%d) outside Raw of %d", sql, token.Text, token.Start, token.End, len(info.Raw))
+			}
+			if got := info.Raw[token.Start:token.End]; got != token.Text {
+				t.Fatalf("%q: token %q does not match Raw[%d:%d] = %q", sql, token.Text, token.Start, token.End, got)
+			}
+		}
+	}
+}
