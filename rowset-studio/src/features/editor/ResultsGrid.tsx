@@ -45,7 +45,13 @@ export default function ResultsGrid({ result, editing, engine, onFilteredCount }
   }, [filters]);
   const indexes = useMemo(() => filteredIndexes(result.rows, debouncedFilters, result.columnTypes), [result.rows, result.rowCount, result.columnTypes, debouncedFilters]);
   const visibleResult = useMemo(() => ({ ...result, rows: indexes.map(index => result.rows[index]), rowCount: indexes.length }), [result, indexes]);
-  useEffect(() => { onFilteredCount?.(indexes.length, result.rows.length); }, [indexes.length, result.rows.length, onFilteredCount]);
+  // Reported through a ref so the effect depends on the numbers alone. A
+  // caller that passes an inline callback would otherwise re-run this on
+  // every one of its renders, and a report that re-rendered the caller would
+  // then spin both of them.
+  const reportCount = useRef(onFilteredCount);
+  reportCount.current = onFilteredCount;
+  useEffect(() => { reportCount.current?.(indexes.length, result.rows.length); }, [indexes.length, result.rows.length]);
   // Document engines return one JSON document per row; that reads better as
   // JSON than as a grid with a single stringified column, so it's the default
   // view for them. Every other engine still opens as Grid.

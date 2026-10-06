@@ -5,6 +5,19 @@ and `scripts/package-macos.sh` stamp it into Studio (sidebar), the `rowset`
 executable and the macOS app. Every change set bumps the patch version and adds
 an entry here; after x.y.99 the next version is x.(y+1).0.
 
+## 0.1.9 — 2026-10-06
+
+- Fixed: a result on screen kept a processor core busy for as long as the
+  window stayed open. The grid reported how many rows a filter leaves from an
+  effect, and the editor answered with a fresh object through a callback it
+  rebuilt on every render: the effect re-ran because the callback was new, the
+  answer re-rendered the editor because the object was new, and the two drove
+  each other at full speed. Nothing looked wrong, which is why it went
+  unnoticed. The count is now reported through a callback that keeps its
+  identity, and it leaves the state alone when the numbers have not moved.
+  `npm run test:e2e:idle` measures what the editor spends with a result shown
+  and nobody typing, and fails if a loop comes back.
+
 ## 0.1.8 — 2026-10-06
 
 - Fixed: a script's token positions pointed into the statements it was made

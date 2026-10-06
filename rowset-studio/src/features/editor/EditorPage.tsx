@@ -1,6 +1,6 @@
 import QueryParameters from "./ParameterFields";
 import { parameterNames, resolveParameters, type QueryParameters as ParameterValues } from "./queryParameters";
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useBlocker, useLocation, useNavigate } from "react-router";
 import { Button, Modal, Panel } from "../../components/ui";
@@ -1262,6 +1262,14 @@ function BottomPanel({
   // Reported by ResultsGrid's own filter state, so the status bar can show
   // how many of the loaded rows a filter left visible.
   const [filteredCount, setFilteredCount] = useState<{ shown: number; total: number } | null>(null);
+  // The grid reports this from an effect, so the callback has to keep its
+  // identity and the state has to stay the same object when the numbers have
+  // not moved. An inline callback storing a fresh object each time re-ran the
+  // effect on every render and re-rendered on every effect - a loop that spun
+  // the editor at full speed while nothing was happening.
+  const reportFilteredCount = useCallback((shown: number, total: number) => {
+    setFilteredCount(current => (current && current.shown === shown && current.total === total ? current : { shown, total }));
+  }, []);
   const activeResult = results ? Math.min(run.activeResult ?? results.length - 1, results.length - 1) : -1;
   const selected = results && run.status !== "running" ? results[activeResult] : undefined;
   const shownRun: TabRunState = selected ? { ...run, status: selected.status, data: selected.data, error: selected.error } : run;
@@ -1317,7 +1325,7 @@ function BottomPanel({
             {(shownRun.status === "error" || shownRun.status === "pending") && shownRun.error ? (
               <PolicyBanner error={shownRun.error} context={denialContext} />
             ) : shownRun.data ? (
-              <ResultsGrid key={`${run.startedAt}:${activeResult}`} result={shownRun.data} editing={editingFor(rowEditing, selected ? selected.sql : run.sql)} engine={engine} onFilteredCount={(shown, total) => setFilteredCount({ shown, total })} />
+              <ResultsGrid key={`${run.startedAt}:${activeResult}`} result={shownRun.data} editing={editingFor(rowEditing, selected ? selected.sql : run.sql)} engine={engine} onFilteredCount={reportFilteredCount} />
             ) : (
               run.status !== "running" && (
                 <EmptyState title="No results yet" text="Run a query to populate the result grid." />
