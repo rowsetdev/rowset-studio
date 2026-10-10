@@ -41,7 +41,11 @@ func backupTargetOf(info sqlguard.Info) (backupTarget, bool) {
 	if info.IsScript {
 		return backupTarget{}, false
 	}
-	if (info.Command != sqlguard.Update && info.Command != sqlguard.Delete) || len(info.Tables) != 1 || !info.HasWhere {
+	// A DELETE with no WHERE empties the table, which is exactly the write
+	// worth saving: the default policy refuses it, so the only way it runs is
+	// that someone deliberately allowed it. Every row is the row set here.
+	wholeTable := info.Command == sqlguard.Delete && !info.HasWhere
+	if (info.Command != sqlguard.Update && info.Command != sqlguard.Delete) || len(info.Tables) != 1 || (!info.HasWhere && !wholeTable) {
 		return backupTarget{}, false
 	}
 	var top []sqlguard.Token
@@ -66,8 +70,21 @@ func backupTargetOf(info sqlguard.Info) (backupTarget, bool) {
 			}
 		}
 	}
-	if where < 0 || (info.Command == sqlguard.Update && froms > 0) || (info.Command == sqlguard.Delete && (froms != 1 || top[1].Lower != "from")) {
+	if (where < 0 && !wholeTable) || (info.Command == sqlguard.Update && froms > 0) || (info.Command == sqlguard.Delete && (froms != 1 || top[1].Lower != "from")) {
 		return backupTarget{}, false
+	}
+	table := info.Tables[0]
+	if wholeTable {
+		// DELETE … LIMIT 5 removes an arbitrary five rows, so the rows read
+		// here would not be the rows deleted and putting them back would
+		// collide with the ones that stayed. Those keep no backup.
+		for _, token := range top[2:] {
+			switch token.Lower {
+			case "order", "limit", "returning", "option", "using", "where":
+				return backupTarget{}, false
+			}
+		}
+		return backupTarget{kind: "delete", schema: table.Schema, table: table.Name, where: "1=1"}, true
 	}
 	end := len(info.Raw)
 	for _, token := range top[where+1:] {
@@ -84,7 +101,6 @@ func backupTargetOf(info sqlguard.Info) (backupTarget, bool) {
 	if info.Command == sqlguard.Delete {
 		kind = "delete"
 	}
-	table := info.Tables[0]
 	return backupTarget{kind: kind, schema: table.Schema, table: table.Name, where: clause}, true
 }
 
@@ -671,12 +687,23 @@ func restoreSQL(engineName string, item store.RowBackup, payload rowBackupPayloa
 	return out.String()
 }
 
+// reachableRowBackup reads a backup the caller may act on: their own, or,
+// for an administrator, any backup in the organisation. An approved write is
+// executed for its author, so without this the one person allowed to clear
+// that write would be the one person unable to undo it.
+func (s *Server) reachableRowBackup(ctx context.Context, identity domain.Identity, id string) (store.RowBackup, error) {
+	if identity.IsAdmin() {
+		return s.store.OrgRowBackup(ctx, id, identity.OrgID)
+	}
+	return s.store.RowBackup(ctx, id, identity.UserID)
+}
+
 // applyRowBackup puts the backed-up rows back in one transaction. Each
 // statement passes the same policies as in the editor.
 func (s *Server) applyRowBackup(w http.ResponseWriter, r *http.Request) {
 	defer s.holdAwake()()
 	identity := identityFromContext(r.Context())
-	item, err := s.store.RowBackup(r.Context(), r.PathValue("id"), identity.UserID)
+	item, err := s.reachableRowBackup(r.Context(), identity, r.PathValue("id"))
 	if err != nil {
 		writeError(w, http.StatusNotFound, "NOT_FOUND", "row backup not found")
 		return
@@ -808,7 +835,15 @@ func (s *Server) applyRowBackup(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listRowBackups(w http.ResponseWriter, r *http.Request) {
-	items, err := s.store.ListRowBackups(r.Context(), identityFromContext(r.Context()).UserID)
+	identity := identityFromContext(r.Context())
+	// An administrator sees the whole organisation's backups, since they are
+	// the one who can put any of them back; everyone else sees their own.
+	// This lists what was saved, not the values: those stay encrypted until
+	// a restore or the admin-only script.
+	items, err := s.store.ListRowBackups(r.Context(), identity.UserID)
+	if identity.IsAdmin() {
+		items, err = s.store.ListOrgRowBackups(r.Context(), identity.OrgID)
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "INTERNAL", "row backups unavailable")
 		return
@@ -819,7 +854,7 @@ func (s *Server) listRowBackups(w http.ResponseWriter, r *http.Request) {
 		if payload, err := s.openRowBackup(item); err == nil {
 			statement = payload.Statement
 		}
-		out = append(out, map[string]any{"id": item.ID, "connectionId": item.ConnectionID, "database": item.Database, "schema": item.Schema, "table": item.Table, "kind": item.Kind, "rows": item.Rows, "statement": statement, "createdAt": item.CreatedAt})
+		out = append(out, map[string]any{"id": item.ID, "userId": item.UserID, "connectionId": item.ConnectionID, "database": item.Database, "schema": item.Schema, "table": item.Table, "kind": item.Kind, "rows": item.Rows, "statement": statement, "createdAt": item.CreatedAt})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"backups": out})
 }
@@ -831,7 +866,7 @@ func (s *Server) rowBackupRestore(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "POLICY_DENIED", "only administrators can open a backup's script; use Restore instead")
 		return
 	}
-	item, err := s.store.RowBackup(r.Context(), r.PathValue("id"), identityFromContext(r.Context()).UserID)
+	item, err := s.reachableRowBackup(r.Context(), identityFromContext(r.Context()), r.PathValue("id"))
 	if err != nil {
 		writeError(w, http.StatusNotFound, "NOT_FOUND", "row backup not found")
 		return

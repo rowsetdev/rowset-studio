@@ -59,6 +59,31 @@ func (s *Store) RowBackup(ctx context.Context, id, userID string) (RowBackup, er
 	return scanRowBackup(s.db.QueryRowContext(ctx, "SELECT "+rowBackupColumns+" FROM row_backups WHERE id = ? AND user_id = ?", id, userID))
 }
 
+// OrgRowBackup reads a backup belonging to anyone in the organisation. It is
+// for administrators: on a shared installation the person who can approve a
+// write is the one who has to be able to put it back.
+func (s *Store) OrgRowBackup(ctx context.Context, id, orgID string) (RowBackup, error) {
+	return scanRowBackup(s.db.QueryRowContext(ctx, "SELECT "+rowBackupColumns+" FROM row_backups WHERE id = ? AND org_id = ?", id, orgID))
+}
+
+// ListOrgRowBackups lists every backup in the organisation, newest first.
+func (s *Store) ListOrgRowBackups(ctx context.Context, orgID string) ([]RowBackup, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT "+rowBackupColumns+" FROM row_backups WHERE org_id = ? ORDER BY created_at DESC", orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []RowBackup{}
+	for rows.Next() {
+		item, err := scanRowBackup(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func (s *Store) DeleteRowBackup(ctx context.Context, id, userID string) error {
 	result, err := s.db.ExecContext(ctx, "DELETE FROM row_backups WHERE id = ? AND user_id = ?", id, userID)
 	if err != nil {

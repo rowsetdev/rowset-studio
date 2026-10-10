@@ -5,6 +5,35 @@ and `scripts/package-macos.sh` stamp it into Studio (sidebar), the `rowset`
 executable and the macOS app. Every change set bumps the patch version and adds
 an entry here; after x.y.99 the next version is x.(y+1).0.
 
+## 0.1.10 — 2026-10-10
+
+- Fixed: a statement held for review and then approved ran without a row
+  backup. `ExecuteDeferred` took the live query path's access checks,
+  policies, hooks, row limits and activity recording, but not its backup, so
+  the one write that had been looked at by a second person was the one write
+  that could not be put back. It now saves the rows an eligible UPDATE or
+  DELETE is about to change, and a write whose rows cannot be saved does not
+  run: nobody is waiting at that point to be asked whether to go on without
+  one. A failed statement discards its backup, as on the live path.
+- Changed: a DELETE with no WHERE clause is backed up as the whole table,
+  where previously no backup was taken. The default policy refuses that
+  statement, so the only way it runs is that someone deliberately allowed it,
+  which makes it the write most worth being able to undo. `DELETE … LIMIT`
+  and `DELETE … ORDER BY … LIMIT` keep no backup: the engine removes an
+  arbitrary few rows, so the rows read beforehand are not the rows deleted
+  and putting them back would collide with the ones that stayed.
+- Changed: an administrator reaches every row backup in the organisation -
+  the list, Restore and the script - where before each backup was readable
+  only by the person whose statement made it. An approved write runs for its
+  author, and on a production connection that author's own Restore is itself
+  a production write and is held, so the person who cleared the write was the
+  one person who could not undo it. The list says who each backup belongs to;
+  the values stay encrypted until a restore or the admin-only script.
+- Added: `Kit.EvaluateStatement` reports what the policies say about a
+  statement the caller has not run. An escalation handler uses it to record
+  why a statement needs review, so whoever reviews it sees the rule that
+  stopped it instead of only the requester's own words.
+
 ## 0.1.9 — 2026-10-06
 
 - Fixed: a result on screen kept a processor core busy for as long as the

@@ -101,9 +101,24 @@ func (s *Server) ExecuteDeferred(r *http.Request, statement DeferredStatement) D
 	record := func(rows, duration int64, command bool, status, message string) {
 		s.recordClientActivity(r.Context(), caller, connection, statement.SQL, normalized, hash, statement.Source, r.RemoteAddr, r.UserAgent(), rows, duration, command, status, decision, "allow", statement.Reference, message)
 	}
+	// A held statement is the riskiest kind there is - it reached review
+	// because a policy stopped it - so the rows an eligible UPDATE or DELETE
+	// is about to change are saved here as well. The live path asks the
+	// client to opt in; by the time a statement runs from here nobody is
+	// waiting to answer, so the backup is taken whenever one can be, and a
+	// write whose rows cannot be saved does not run at all.
+	var backup Annotations
+	if sqlguard.IsWrite(info.Command) {
+		backup = s.captureRowBackup(ctx, caller, connection, info, target, nil, connection.Database)
+		if reason, ok := backup["backupBlocked"].(string); ok {
+			record(0, 0, false, "error", reason)
+			return deferredError(reason)
+		}
+	}
 	if engine.ReturnsRows(sql) {
 		stream, err := s.engines.Query(ctx, target, sql)
 		if err != nil {
+			s.discardRowBackup(caller, backup)
 			record(0, 0, false, "error", err.Error())
 			return deferredError(err.Error())
 		}
@@ -112,6 +127,7 @@ func (s *Server) ExecuteDeferred(r *http.Request, statement DeferredStatement) D
 		for rowLimit <= 0 || rows < int64(rowLimit) {
 			_, ok, err := stream.Next()
 			if err != nil {
+				s.discardRowBackup(caller, backup)
 				record(rows, stream.DurationMS(), false, "error", err.Error())
 				return DeferredResult{Status: "error", Rows: rows, DurationMS: stream.DurationMS(), Error: err.Error()}
 			}
@@ -125,6 +141,7 @@ func (s *Server) ExecuteDeferred(r *http.Request, statement DeferredStatement) D
 	}
 	result, err := s.engines.Execute(ctx, target, sql, 0)
 	if err != nil {
+		s.discardRowBackup(caller, backup)
 		record(0, result.DurationMS, false, "error", err.Error())
 		return DeferredResult{Status: "error", DurationMS: result.DurationMS, Error: err.Error()}
 	}
@@ -134,6 +151,34 @@ func (s *Server) ExecuteDeferred(r *http.Request, statement DeferredStatement) D
 	}
 	record(rows, result.DurationMS, len(result.Columns) == 0, "success", "")
 	return DeferredResult{Status: "ok", Rows: rows, DurationMS: result.DurationMS}
+}
+
+// EvaluateStatement reports what the policies say about a statement the
+// caller has not run: the same verdict the query path would reach, before
+// any clearance. An escalation handler uses it to record why a statement
+// needs review, so whoever reviews it sees the policy that stopped it rather
+// than only the requester's own words.
+func (s *Server) EvaluateStatement(r *http.Request, identity domain.Identity, connection domain.Connection, info sqlguard.Info) (policy.Decision, error) {
+	role, err := s.role(r.Context(), identity.UserID)
+	if err != nil {
+		return policy.Decision{}, err
+	}
+	disabled, enabled, rowLimit, _, err := s.resolvePolicies(r, identity, connection)
+	if err != nil {
+		return policy.Decision{}, err
+	}
+	decision := policy.Evaluate(policy.Input{Statement: info, Role: role.Name, ReadOnly: role.ReadOnly || connection.ReadOnly, Environment: connection.Environment, Cleared: false, Disabled: disabled, Enabled: enabled})
+	if identity.IsAdmin() {
+		return decision, nil
+	}
+	decision, _, err = s.applyCustomPolicies(r, identity, connection, info, false, decision, rowLimit)
+	return decision, err
+}
+
+// EvaluateStatement reports what the policies say about a statement that has
+// not run; see Server.EvaluateStatement.
+func (k Kit) EvaluateStatement(r *http.Request, identity domain.Identity, connection domain.Connection, info sqlguard.Info) (policy.Decision, error) {
+	return k.server.EvaluateStatement(r, identity, connection, info)
 }
 
 // AuthorizedConnection resolves the {id} path value to a connection the

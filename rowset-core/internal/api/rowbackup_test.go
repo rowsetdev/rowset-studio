@@ -16,6 +16,12 @@ func TestBackupTargetOf(t *testing.T) {
 		{"update public.orders set total = total * 2 where status in ('a', 'b') returning id", "update", "orders", "status in ('a', 'b')"},
 		{"DELETE FROM orders WHERE created_at < '2020-01-01' ORDER BY id LIMIT 10", "delete", "orders", "created_at < '2020-01-01'"},
 		{"DELETE FROM orders WHERE id IN (SELECT id FROM orders WHERE total = 0);", "delete", "orders", "id IN (SELECT id FROM orders WHERE total = 0)"},
+		{"DELETE FROM orders", "delete", "orders", "1=1"},
+		{"delete from public.orders;", "delete", "orders", "1=1"},
+		// An arbitrary slice of the table: the rows read here are not the
+		// rows the engine removes, so putting them back would collide.
+		{"DELETE FROM orders LIMIT 5", "", "", ""},
+		{"DELETE FROM orders ORDER BY id LIMIT 5", "", "", ""},
 		{"UPDATE orders SET total = 0", "", "", ""},
 		{"DELETE orders WHERE id = 1", "", "", ""},
 		{"UPDATE o SET total = 0 FROM orders o JOIN customers c ON c.id = o.customer_id WHERE c.id = 1", "", "", ""},
