@@ -100,7 +100,8 @@ func (s *Server) runScheduled(ctx context.Context, item store.ScheduledQuery, tr
 	started := time.Now()
 	rows, path, err := s.executeScheduled(ctx, item)
 	finished := time.Now().UTC().Format(time.RFC3339Nano)
-	go s.notifyScheduledRun(item.UserID, item.Name, rows, time.Since(started), path, err)
+	elapsed := time.Since(started)
+	s.notify(func() { s.notifyScheduledRun(item.UserID, item.Name, rows, elapsed, path, err) })
 	run.FinishedAt, run.Rows = &finished, rows
 	if err != nil {
 		message := err.Error()

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { formatSql, hashComments, splitStatements, statementAt, sqlTokens } from './sqlText.ts';
+import { changesSchema, formatSql, hashComments, splitStatements, statementAt, sqlTokens } from './sqlText.ts';
 
 test('format preserves every quoted token and comment', () => {
   const sql = " SELECT 'a  b, WHERE c', \"Case Name\", $$begin;  end$$ FROM t -- keep  this\n WHERE x='it''s  safe' /* nested /* text */ remains */;";
@@ -83,4 +83,17 @@ test('GO only separates when it stands alone on its line', () => {
   // A trailing GO leaves no empty batch behind.
   assert.deepEqual(splitStatements('SELECT 1\nGO\n', 'mssql').map(s => s.sql), ['SELECT 1']);
   assert.deepEqual(splitStatements('\nGO\n', 'mssql').map(s => s.sql), []);
+});
+
+test('a schema change is a keyword of the statement, not text inside it', () => {
+  assert.equal(changesSchema('CREATE TABLE t(id int)'), true);
+  assert.equal(changesSchema('alter table t add column c int'), true);
+  assert.equal(changesSchema('TRUNCATE TABLE t'), true);
+  // The word inside a string, a quoted name or a comment reloaded the whole
+  // schema after every such statement.
+  assert.equal(changesSchema("SELECT * FROM notes WHERE body = 'drop'"), false);
+  assert.equal(changesSchema('SELECT "create" FROM t'), false);
+  assert.equal(changesSchema('SELECT 1 -- drop table t'), false);
+  assert.equal(changesSchema('SELECT 1 /* alter */'), false);
+  assert.equal(changesSchema('SELECT dropped FROM t'), false);
 });

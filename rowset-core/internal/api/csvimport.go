@@ -490,12 +490,17 @@ func hexText(value string) bool {
 	return err == nil
 }
 
+// hexLiteral writes whole bytes of hex as the engine's own binary literal.
+// SQLite and DuckDB have their own spellings: PostgreSQL's '\x...' is a text
+// literal to them, which would store the digits instead of the bytes.
 func hexLiteral(engineName, digits string) string {
 	switch strings.ToLower(engineName) {
-	case "mysql", "mariadb":
+	case "mysql", "mariadb", "sqlite":
 		return "X'" + digits + "'"
 	case "mssql", "sqlserver":
 		return "0x" + digits
+	case "duckdb":
+		return "unhex('" + digits + "')"
 	default:
 		return `'\x` + digits + `'`
 	}
@@ -515,16 +520,11 @@ func importDelimiter(value string) (rune, error) {
 	return delimiter, nil
 }
 
-// quoteSQLIdentifier quotes a table or column name for the engine.
-func quoteSQLIdentifier(engine, name string) string {
-	switch strings.ToLower(engine) {
-	case "mysql", "mariadb":
-		return "`" + strings.ReplaceAll(name, "`", "``") + "`"
-	case "mssql", "sqlserver":
-		return "[" + strings.ReplaceAll(name, "]", "]]") + "]"
-	default:
-		return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
-	}
+// quoteSQLIdentifier quotes a table or column name for the engine. The
+// spelling itself lives in the engine package, so a statement this package
+// builds and one the engine builds quote a name the same way.
+func quoteSQLIdentifier(engineName, name string) string {
+	return engine.QuoteIdentifier(engineName, name)
 }
 
 // importLiteral writes a CSV value as a string literal; each database converts

@@ -123,12 +123,12 @@ func TestLiveTLSModesAgainstRealServers(t *testing.T) {
 			"verify-full":        root,
 			"client certificate": my("certuser", TLSSettings{Mode: TLSVerifyFull, CAPEM: ca, ClientCertPEM: clientCert, ClientKeyPEM: clientKey}),
 		} {
-			origins := mysqlColumnOrigins(ctx, connection, "SELECT email FROM rowset_tls_origin WHERE id > 0")
+			origins := manager.mysqlColumnOrigins(ctx, connection, "SELECT email FROM rowset_tls_origin WHERE id > 0")
 			if len(origins) != 1 || !origins[0].Resolved || origins[0].Table != "rowset_tls_origin" || origins[0].Column != "email" {
 				t.Fatalf("%s: origins = %#v", name, origins)
 			}
 		}
-		if origins := mysqlColumnOrigins(ctx, my("root", TLSSettings{Mode: TLSVerifyFull, CAPEM: other}), "SELECT email FROM rowset_tls_origin WHERE id > 0"); origins != nil {
+		if origins := manager.mysqlColumnOrigins(ctx, my("root", TLSSettings{Mode: TLSVerifyFull, CAPEM: other}), "SELECT email FROM rowset_tls_origin WHERE id > 0"); origins != nil {
 			t.Fatalf("metadata client ignored certificate verification: %#v", origins)
 		}
 	})

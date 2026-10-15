@@ -326,14 +326,6 @@ export function isMongoDeleteQuery(source: string): boolean {
   }
 }
 
-export function mongoUpdateQuery(collection = "") {
-  return `db.${collection || "collection"}.updateOne({}, {"$set": {}})`;
-}
-
-export function mongoDeleteQuery(collection = "") {
-  return `db.${collection || "collection"}.deleteOne({})`;
-}
-
 function mongoUpdateShellToRequest(source: string): string {
   const match = UPDATE_SHELL_QUERY.exec(source);
   if (!match) throw new Error("Query must start with db.<collection>.updateOne(filter, update)");

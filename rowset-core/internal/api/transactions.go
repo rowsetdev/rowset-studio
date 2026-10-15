@@ -103,17 +103,22 @@ func (s *Server) beginTransaction(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]string{"txnId": txnID})
 }
 
-func (s *Server) transactionEntry(w http.ResponseWriter, r *http.Request, connection domain.Connection) (*transactionEntry, bool) {
+// transactionEntry finds the caller's transaction and marks it in use. The
+// claim is taken under the same lock the idle check uses: a reaper that ran
+// between finding the entry and claiming it would roll the transaction back
+// under a request that is about to use it. done releases the claim.
+func (s *Server) transactionEntry(w http.ResponseWriter, r *http.Request, connection domain.Connection) (item *transactionEntry, done func(), ok bool) {
 	identity := identityFromContext(r.Context())
 	txnID := r.PathValue("txn_id")
 	s.txnMu.Lock()
-	item := s.txns[txnID]
+	item = s.txns[txnID]
 	authorized := item != nil && item.userID == identity.UserID && item.connectionID == connection.ID
 	expired := authorized && item.running == 0 && time.Since(item.lastUsed) > s.transactionIdleTimeout()
 	if expired {
 		delete(s.txns, txnID)
 	} else if authorized {
 		item.lastUsed = time.Now()
+		item.running++
 	}
 	s.txnMu.Unlock()
 	if expired {
@@ -123,9 +128,14 @@ func (s *Server) transactionEntry(w http.ResponseWriter, r *http.Request, connec
 	}
 	if !authorized || expired {
 		writeError(w, 404, "TXN_NOT_FOUND", "transaction not found or expired")
-		return nil, false
+		return nil, nil, false
 	}
-	return item, true
+	return item, func() {
+		s.txnMu.Lock()
+		item.running--
+		item.lastUsed = time.Now()
+		s.txnMu.Unlock()
+	}, true
 }
 
 func (s *Server) transactionQuery(w http.ResponseWriter, r *http.Request) {
@@ -133,10 +143,11 @@ func (s *Server) transactionQuery(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	item, ok := s.transactionEntry(w, r, connection)
+	item, done, ok := s.transactionEntry(w, r, connection)
 	if !ok {
 		return
 	}
+	defer done()
 	var input queryInput
 	if !decodeJSON(w, r, &input) {
 		return
@@ -146,15 +157,6 @@ func (s *Server) transactionQuery(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "BAD_REQUEST", "sql is required")
 		return
 	}
-	s.txnMu.Lock()
-	item.running++
-	s.txnMu.Unlock()
-	defer func() {
-		s.txnMu.Lock()
-		item.running--
-		item.lastUsed = time.Now()
-		s.txnMu.Unlock()
-	}()
 	item.mu.Lock()
 	defer item.mu.Unlock()
 	s.executeQuery(w, r, connection, input, item.transaction)
@@ -181,10 +183,11 @@ func (s *Server) finishTransaction(w http.ResponseWriter, r *http.Request, commi
 	if !ok {
 		return
 	}
-	item, ok := s.transactionEntry(w, r, connection)
+	item, done, ok := s.transactionEntry(w, r, connection)
 	if !ok {
 		return
 	}
+	defer done()
 	item.mu.Lock()
 	defer item.mu.Unlock()
 	s.txnMu.Lock()

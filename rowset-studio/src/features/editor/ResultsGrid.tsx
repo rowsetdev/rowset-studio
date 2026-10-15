@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "../../components/Icon";
 import { useActiveExtensions } from "../../app/extensions";
 import { Modal } from "../../components/ui";
@@ -28,7 +28,7 @@ function cellText(value: unknown) {
   return value == null ? "" : typeof value === "object" ? JSON.stringify(value) : String(value);
 }
 
-export default function ResultsGrid({ result, editing, engine, onFilteredCount }: { result: QueryResult; editing?: ResultEditing; engine?: string; onFilteredCount?: (shown: number, total: number) => void }) {
+function ResultsGrid({ result, editing, engine, onFilteredCount }: { result: QueryResult; editing?: ResultEditing; engine?: string; onFilteredCount?: (shown: number, total: number) => void }) {
   const [filters, setFilters] = useState<ResultFilter[]>([]);
   // How tightly the grid packs its rows and columns, remembered per browser.
   const [density, setDensity] = useState<GridDensity>(() => gridDensity());
@@ -255,7 +255,10 @@ function GridView({ result, indexes, filterKey, density, editable, edits, onEdit
   // database client shows on the same screen.
   const autoWidths = useMemo(
     () => autoColumnWidths(result.columns, result.rows, result.columnTypes, density),
-    [result.columns, result.rows, result.columnTypes, density],
+    // rowCount as well as the array: the rows array is reused while a result
+    // streams in, so without it the columns stay as wide as the first chunk
+    // made them.
+    [result.columns, result.rows, result.rowCount, result.columnTypes, density],
   );
   const columnWidth = (index: number) => widths[index] ?? autoWidths[index] ?? 120;
   const [sort, setSort] = useState<{ col: number; dir: "asc" | "desc" } | null>(null);
@@ -570,3 +573,9 @@ function renderCell(v: unknown) {
   if (typeof v === "object") return JSON.stringify(v);
   return String(v);
 }
+
+// The editor re-renders on things the grid does not care about - a cursor
+// move, a resize, a status tick - and re-rendering a grid of thousands of
+// cells for those is what made the editor feel heavy. Its props are stable
+// between runs, so the grid only renders when the result itself changes.
+export default memo(ResultsGrid);

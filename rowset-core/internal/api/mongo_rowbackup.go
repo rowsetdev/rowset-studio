@@ -88,19 +88,10 @@ func (s *Server) mongoCaptureTxnBackup(identity domain.Identity, connection doma
 	return s.mongoFinishBackupCapture(identity, connection, database, collection, kind, statement, docs, truncated, err)
 }
 
+func (p mongoBackupPayload) envelope() (string, string) { return p.BackupID, p.UserID }
+
 func (s *Server) openMongoRowBackup(item store.RowBackup) (mongoBackupPayload, error) {
-	var payload mongoBackupPayload
-	if s.vault == nil {
-		return payload, errors.New("secret vault unavailable")
-	}
-	plain, err := s.vault.Decrypt(item.Ciphertext, item.Nonce)
-	if err != nil {
-		return payload, err
-	}
-	if err := json.Unmarshal(plain, &payload); err != nil || payload.BackupID != item.ID || payload.UserID != item.UserID {
-		return payload, errors.New("the backup does not belong to this record")
-	}
-	return payload, nil
+	return openBackup[mongoBackupPayload](s, item)
 }
 
 // mongoDocumentID extracts a document's _id as Extended JSON, for the

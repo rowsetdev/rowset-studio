@@ -74,17 +74,20 @@ func Evaluate(input Input) Decision {
 			}
 		}
 	}
-	if stmt.Kind == sqlguard.Select && len(stmt.Tables) > 0 && !stmt.HasWhere {
+	// LacksWhere, not Kind plus HasWhere: a script is judged by one kind, and
+	// a DELETE without WHERE inside it must trip this rule even when the
+	// script is named after the UPDATE that does have one.
+	if stmt.LacksWhere(sqlguard.Select) && len(stmt.Tables) > 0 {
 		if d, ok := deny("deny_select_without_where", "SELECT from a table without WHERE is forbidden", Medium); ok {
 			return d
 		}
 	}
-	if stmt.Kind == sqlguard.Delete && !stmt.HasWhere {
+	if stmt.LacksWhere(sqlguard.Delete) {
 		if d, ok := deny("deny_delete_without_where", "DELETE without WHERE is forbidden", Critical); ok {
 			return d
 		}
 	}
-	if stmt.Kind == sqlguard.Update && !stmt.HasWhere {
+	if stmt.LacksWhere(sqlguard.Update) {
 		if d, ok := deny("deny_update_without_where", "UPDATE without WHERE is forbidden", Critical); ok {
 			return d
 		}

@@ -80,3 +80,25 @@ func TestCassandraStatementsUseGuardrails(t *testing.T) {
 		t.Fatalf("read-only insert: %+v", decision)
 	}
 }
+
+// A script is judged by one kind, and update, insert and delete rank the
+// same, so the deciding kind used to hide the others: the delete of
+// "UPDATE ... WHERE ...; DELETE FROM t" ran unguarded.
+func TestScriptHidesNoUnscopedWrite(t *testing.T) {
+	cases := []struct{ sql, policyID string }{
+		{"update a set x=1 where id=1; delete from b", "deny_delete_without_where"},
+		{"insert into a values (1); delete from b", "deny_delete_without_where"},
+		{"delete from b where id=1; update a set x=1", "deny_update_without_where"},
+		{"insert into a values (1); select * from b", "deny_select_without_where"},
+	}
+	for _, item := range cases {
+		got := Evaluate(Input{Statement: statement(t, item.sql), Disabled: map[string]bool{}, Enabled: map[string]bool{}})
+		if got.Effect != Deny || got.PolicyID != item.policyID {
+			t.Fatalf("%q: want %s denial, got %#v", item.sql, item.policyID, got)
+		}
+	}
+	scoped := Evaluate(Input{Statement: statement(t, "update a set x=1 where id=1; delete from b where id=2"), Disabled: map[string]bool{}, Enabled: map[string]bool{}})
+	if scoped.Effect != Allow {
+		t.Fatalf("fully scoped script denied: %#v", scoped)
+	}
+}

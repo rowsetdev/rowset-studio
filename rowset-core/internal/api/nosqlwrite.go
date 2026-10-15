@@ -58,6 +58,37 @@ func (s *Server) nosqlPolicyAllowed(w http.ResponseWriter, r *http.Request, conn
 	return timeout, true
 }
 
+// nosqlReadGuard is nosqlPolicyAllowed's read-side counterpart: a MongoDB
+// find or aggregate, a Redis scan, an Elasticsearch search. It evaluates the
+// caller's own role, like every other path does - a hardcoded "admin" here
+// left role-scoped rules unevaluated for every document read - and returns
+// the row cap and timeout the policies resolved to.
+func (s *Server) nosqlReadGuard(w http.ResponseWriter, r *http.Request, connection domain.Connection, info sqlguard.Info, rawBody string) (limit, timeout int, ok bool) {
+	identity := identityFromContext(r.Context())
+	role, err := s.role(r.Context(), identity.UserID)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "role missing")
+		return 0, 0, false
+	}
+	disabled, enabled, limit, timeout, err := s.resolvePolicies(r, identity, connection)
+	if err != nil {
+		writeError(w, 500, "INTERNAL", "policies unavailable")
+		return 0, 0, false
+	}
+	decision := policy.Evaluate(policy.Input{Statement: info, Role: role.Name, ReadOnly: role.ReadOnly || connection.ReadOnly, Environment: connection.Environment, Disabled: disabled, Enabled: enabled})
+	decision, limit, err = s.applyCustomPolicies(r, identity, connection, info, false, decision, limit)
+	if err != nil {
+		writeError(w, 500, "INTERNAL", "policies unavailable")
+		return 0, 0, false
+	}
+	if decision.Effect != policy.Allow {
+		s.recordActivity(r, connection.ID, rawBody, "blocked", 0, 0, "", "", auditMeta{decision: "deny", reason: decision.Reason, policyID: decision.PolicyID})
+		writePolicyError(w, 403, "POLICY_DENIED", decision, nil)
+		return 0, 0, false
+	}
+	return limit, timeout, true
+}
+
 // nosqlWriteGuard is nosqlPolicyAllowed plus opening the connection, for a
 // standalone (non-transaction) write.
 func (s *Server) nosqlWriteGuard(w http.ResponseWriter, r *http.Request, connection domain.Connection, database string, info sqlguard.Info, rawBody string) (target engine.Connection, ctx context.Context, cancel context.CancelFunc, ok bool) {

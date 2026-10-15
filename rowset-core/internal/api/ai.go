@@ -67,12 +67,18 @@ func (s *Server) aiSettings(w http.ResponseWriter, r *http.Request) {
 		"model":       settings.Model,
 		"shareSchema": settings.ShareSchema,
 		"hasKey":      len(settings.Ciphertext) > 0,
-		"commands":    availableAICommands(),
+		"commands":    s.availableAICommands(),
 	})
 }
 
 // availableAICommands lists the assistant tools installed on this computer.
-func availableAICommands() []string {
+// Only a personal install offers them: on a shared server the command would
+// run on the server, as the server, for whoever asked, so it is not a choice
+// a user there gets to make.
+func (s *Server) availableAICommands() []string {
+	if s.config.Shared {
+		return []string{}
+	}
 	found := make([]string, 0, len(aiCommands))
 	for name := range aiCommands {
 		if _, err := exec.LookPath(name); err == nil {
@@ -96,7 +102,7 @@ func (s *Server) saveAISettings(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "INTERNAL", "the assistant settings could not be saved")
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"provider": aiProviderNone, "shareSchema": true, "hasKey": false, "commands": availableAICommands()})
+		writeJSON(w, http.StatusOK, map[string]any{"provider": aiProviderNone, "shareSchema": true, "hasKey": false, "commands": s.availableAICommands()})
 		return
 	case aiProviderAnthropic, aiProviderOpenAI, aiProviderCLI:
 	default:
@@ -104,6 +110,12 @@ func (s *Server) saveAISettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if input.Provider == aiProviderCLI {
+		// The command would run on the server, under its own account and
+		// with its own files, started by whoever asked.
+		if s.config.Shared {
+			writeError(w, http.StatusBadRequest, "BAD_REQUEST", "a command-line assistant runs on the computer Rowset runs on, so it is only available on a personal workspace")
+			return
+		}
 		if _, ok := aiCommands[input.Model]; !ok {
 			writeError(w, http.StatusBadRequest, "BAD_REQUEST", "choose one of the assistant commands this computer has")
 			return
@@ -138,7 +150,7 @@ func (s *Server) saveAISettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "INTERNAL", "the assistant settings could not be saved")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"provider": settings.Provider, "model": settings.Model, "shareSchema": settings.ShareSchema, "hasKey": len(settings.Ciphertext) > 0, "commands": availableAICommands()})
+	writeJSON(w, http.StatusOK, map[string]any{"provider": settings.Provider, "model": settings.Model, "shareSchema": settings.ShareSchema, "hasKey": len(settings.Ciphertext) > 0, "commands": s.availableAICommands()})
 }
 
 // askAI answers a question about the connected database. The statement, the
@@ -180,7 +192,7 @@ func (s *Server) askAI(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
 	defer cancel()
-	answer, err := askAssistant(ctx, settings, key, prompt)
+	answer, err := askAssistant(ctx, s.config.Shared, settings, key, prompt)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "AI_ERROR", err.Error())
 		return
@@ -303,9 +315,14 @@ func firstSQLBlock(answer string) string {
 	return strings.TrimSpace(rest)
 }
 
-func askAssistant(ctx context.Context, settings store.AISettings, key, prompt string) (string, error) {
+func askAssistant(ctx context.Context, shared bool, settings store.AISettings, key, prompt string) (string, error) {
 	switch settings.Provider {
 	case aiProviderCLI:
+		// Settings saved while this workspace was personal must not start a
+		// command once it serves other people.
+		if shared {
+			return "", errors.New("a command-line assistant is only available on a personal workspace")
+		}
 		return askCommand(ctx, settings.Model, prompt)
 	case aiProviderAnthropic:
 		model := settings.Model

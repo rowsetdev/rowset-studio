@@ -70,24 +70,43 @@ func (s *Server) listConnections(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "INTERNAL", "failed to list connections")
 		return
 	}
-	if !identity.IsAdmin() {
-		visible := connections[:0]
-		for _, connection := range connections {
-			if _, ok := s.connectionGrant(r.Context(), identity, connection.ID); ok {
-				visible = append(visible, connection)
-			}
+	// One read for every connection's nodes, and one grant lookup per
+	// connection: asking per connection, and then again while building each
+	// response, made a list of twenty connections dozens of round trips.
+	nodes := map[string][]domain.ConnectionNode{}
+	if all, err := s.store.ListAllConnectionNodes(r.Context()); err == nil {
+		for _, node := range all {
+			nodes[node.ConnectionID] = append(nodes[node.ConnectionID], node)
 		}
-		connections = visible
 	}
+	grants := map[string]ConnectionGrant{}
+	visible := connections[:0]
+	for _, connection := range connections {
+		grant, ok := s.connectionGrant(r.Context(), identity, connection.ID)
+		if !ok && !identity.IsAdmin() {
+			continue
+		}
+		grants[connection.ID] = grant
+		visible = append(visible, connection)
+	}
+	connections = visible
 	output := make([]map[string]any, 0, len(connections))
 	for _, connection := range connections {
-		output = append(output, s.connectionJSON(r, connection, identity))
+		grant := grants[connection.ID]
+		output = append(output, s.connectionJSONWith(r, connection, identity, nodes[connection.ID], &grant))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"connections": output})
 }
 
 func (s *Server) connectionJSON(r *http.Request, connection domain.Connection, identity domain.Identity) map[string]any {
 	nodes, _ := s.store.ListConnectionNodes(r.Context(), connection.ID)
+	return s.connectionJSONWith(r, connection, identity, nodes, nil)
+}
+
+// connectionJSONWith renders one connection from nodes and a grant the caller
+// already has, so a listing reads neither of them per connection. grant nil
+// means look it up here.
+func (s *Server) connectionJSONWith(r *http.Request, connection domain.Connection, identity domain.Identity, nodes []domain.ConnectionNode, grant *ConnectionGrant) map[string]any {
 	if nodes == nil {
 		nodes = []domain.ConnectionNode{}
 	}
@@ -106,7 +125,12 @@ func (s *Server) connectionJSON(r *http.Request, connection domain.Connection, i
 		result["nodePolicy"] = "user_selectable"
 		result["defaultNodeRole"] = "primary"
 	} else if !identity.IsAdmin() {
-		if grant, ok := s.connectionGrant(r.Context(), identity, connection.ID); ok {
+		if grant == nil {
+			if found, ok := s.connectionGrant(r.Context(), identity, connection.ID); ok {
+				grant = &found
+			}
+		}
+		if grant != nil {
 			result["nodePolicy"] = grant.NodePolicy
 			result["defaultNodeRole"] = grant.DefaultNodeRole
 		}

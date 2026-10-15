@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/rowsetdev/rowset-studio/rowset-core/internal/engine"
-	"github.com/rowsetdev/rowset-studio/rowset-core/internal/policy"
 	sqlguard "github.com/rowsetdev/rowset-studio/rowset-core/sqlguard"
 )
 
@@ -17,7 +16,6 @@ func (s *Server) redisScan(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	identity := identityFromContext(r.Context())
 	if connection.Engine != "redis" && connection.Engine != "valkey" {
 		writeError(w, 400, "UNSUPPORTED", "this connection is not a Redis or Valkey connection")
 		return
@@ -42,21 +40,9 @@ func (s *Server) redisScan(w http.ResponseWriter, r *http.Request) {
 		pattern = "*"
 	}
 	info := nosqlStatement(sqlguard.Select, database, pattern, pattern != "*")
-	disabled, enabled, limit, timeout, err := s.resolvePolicies(r, identity, connection)
-	if err != nil {
-		writeError(w, 500, "INTERNAL", "policies unavailable")
-		return
-	}
-	decision := policy.Evaluate(policy.Input{Statement: info, Role: "admin", Environment: connection.Environment, Disabled: disabled, Enabled: enabled})
-	decision, limit, err = s.applyCustomPolicies(r, identity, connection, info, false, decision, limit)
 	raw, _ := json.Marshal(input)
-	if err != nil {
-		writeError(w, 500, "INTERNAL", "policies unavailable")
-		return
-	}
-	if decision.Effect != policy.Allow {
-		s.recordActivity(r, connection.ID, string(raw), "blocked", 0, 0, "", "", auditMeta{decision: "deny", reason: decision.Reason, policyID: decision.PolicyID})
-		writePolicyError(w, 403, "POLICY_DENIED", decision, nil)
+	limit, timeout, allowed := s.nosqlReadGuard(w, r, connection, info, string(raw))
+	if !allowed {
 		return
 	}
 	if limit > 0 && limit < input.Limit {

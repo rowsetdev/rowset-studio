@@ -400,52 +400,28 @@ function ScopeModal({
           </div>
         )}
 
-        <div>
-          <label className="mb-1 block text-[12px] font-medium text-slate-600 dark:text-slate-300">Connections</label>
-          <div className="mb-2 flex gap-1.5">
-            <ModeButton active={connMode === "all"} onClick={() => setConnMode("all")}>All</ModeButton>
-            <ModeButton active={connMode === "specific"} onClick={() => setConnMode("specific")}>Specific</ModeButton>
-          </div>
-          {connMode === "specific" && (
-            <div className="max-h-[160px] overflow-auto rounded-md border border-slate-200 dark:border-slate-800">
-              {connections.length === 0 && <p className="p-2 text-[12px] text-slate-400">No connections.</p>}
-              {connections.map((c) => (
-                <label key={c.id} className="flex items-center gap-2 border-b border-slate-100 px-2.5 py-1.5 text-[13px] last:border-b-0 dark:border-slate-800">
-                  <input
-                    type="checkbox"
-                    checked={connSelected.includes(c.id)}
-                    onChange={() => setConnSelected((prev) => toggleIn(prev, c.id))}
-                  />
-                  <span className="min-w-0 flex-1 truncate">{c.name}</span>
-                  <EnvBadge env={c.environment} />
-                </label>
-              ))}
-            </div>
-          )}
-        </div>
+        <ScopePicker
+          label="Connections"
+          mode={connMode}
+          onMode={setConnMode}
+          items={connections.map((c) => ({ id: c.id, label: c.name, environment: c.environment }))}
+          selected={connSelected}
+          onToggle={(id) => setConnSelected((prev) => toggleIn(prev, id))}
+          listHeight="max-h-[160px]"
+          gap="mb-2"
+        />
 
-        <div hidden={!shared}>
-          <label className="mb-1 block text-[12px] font-medium text-slate-600 dark:text-slate-300">Roles</label>
-          <div className="mb-2 flex gap-1.5">
-            <ModeButton active={roleMode === "all"} onClick={() => setRoleMode("all")}>All</ModeButton>
-            <ModeButton active={roleMode === "specific"} onClick={() => setRoleMode("specific")}>Specific</ModeButton>
-          </div>
-          {roleMode === "specific" && (
-            <div className="max-h-[160px] overflow-auto rounded-md border border-slate-200 dark:border-slate-800">
-              {roles.length === 0 && <p className="p-2 text-[12px] text-slate-400">No roles.</p>}
-              {roles.map((r) => (
-                <label key={r.id} className="flex items-center gap-2 border-b border-slate-100 px-2.5 py-1.5 text-[13px] last:border-b-0 dark:border-slate-800">
-                  <input
-                    type="checkbox"
-                    checked={roleSelected.includes(r.name)}
-                    onChange={() => setRoleSelected((prev) => toggleIn(prev, r.name))}
-                  />
-                  {r.name}
-                </label>
-              ))}
-            </div>
-          )}
-        </div>
+        <ScopePicker
+          label="Roles"
+          mode={roleMode}
+          onMode={setRoleMode}
+          items={roles.map((r) => ({ id: r.name, label: r.name }))}
+          selected={roleSelected}
+          onToggle={(name) => setRoleSelected((prev) => toggleIn(prev, name))}
+          listHeight="max-h-[160px]"
+          gap="mb-2"
+          hidden={!shared}
+        />
 
         {error && <p className="text-[12px] text-rose-600 dark:text-rose-400">{error}</p>}
         <div className="flex justify-end gap-2">
@@ -460,6 +436,33 @@ function ScopeModal({
         </div>
       </div>
     </Modal>
+  );
+}
+
+// Both dialogs scope a policy the same way: all connections or some, all
+// roles or some. The markup was written out twice, which is why the two
+// dialogs had drifted to different list heights and spacing.
+function ScopePicker({ label, mode, onMode, items, selected, onToggle, listHeight, gap, hidden }: { label: string; mode: "all" | "specific"; onMode: (mode: "all" | "specific") => void; items: { id: string; label: string; environment?: string }[]; selected: string[]; onToggle: (value: string) => void; listHeight: string; gap: string; hidden?: boolean }) {
+  return (
+    <div hidden={hidden}>
+      <label className="mb-1 block text-[12px] font-medium text-slate-600 dark:text-slate-300">{label}</label>
+      <div className={`${gap} flex gap-1.5`}>
+        <ModeButton active={mode === "all"} onClick={() => onMode("all")}>All</ModeButton>
+        <ModeButton active={mode === "specific"} onClick={() => onMode("specific")}>Specific</ModeButton>
+      </div>
+      {mode === "specific" && (
+        <div className={`${listHeight} overflow-auto rounded-md border border-slate-200 dark:border-slate-800`}>
+          {items.length === 0 && <p className="p-2 text-[12px] text-slate-400">{`No ${label.toLowerCase()}.`}</p>}
+          {items.map((item) => (
+            <label key={item.id} className="flex items-center gap-2 border-b border-slate-100 px-2.5 py-1.5 text-[13px] last:border-b-0 dark:border-slate-800">
+              <input type="checkbox" checked={selected.includes(item.id)} onChange={() => onToggle(item.id)} />
+              <span className="min-w-0 flex-1 truncate">{item.label}</span>
+              {item.environment && <EnvBadge env={item.environment} />}
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -578,43 +581,27 @@ function AddPolicyModal({
           )}
         </div>
         <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="mb-1 block text-[12px] font-medium text-slate-600 dark:text-slate-300">Connections</label>
-            <div className="mb-1.5 flex gap-1.5">
-              <ModeButton active={connMode === "all"} onClick={() => setConnMode("all")}>All</ModeButton>
-              <ModeButton active={connMode === "specific"} onClick={() => setConnMode("specific")}>Specific</ModeButton>
-            </div>
-            {connMode === "specific" && (
-              <div className="max-h-[140px] overflow-auto rounded-md border border-slate-200 dark:border-slate-800">
-                {connections.length === 0 && <p className="p-2 text-[12px] text-slate-400">No connections.</p>}
-                {connections.map((c) => (
-                  <label key={c.id} className="flex items-center gap-2 border-b border-slate-100 px-2.5 py-1.5 text-[13px] last:border-b-0 dark:border-slate-800">
-                    <input type="checkbox" checked={connSelected.includes(c.id)} onChange={() => setConnSelected((prev) => toggleIn(prev, c.id))} />
-                    <span className="min-w-0 flex-1 truncate">{c.name}</span>
-                    <EnvBadge env={c.environment} />
-                  </label>
-                ))}
-              </div>
-            )}
-          </div>
-          <div hidden={!shared}>
-            <label className="mb-1 block text-[12px] font-medium text-slate-600 dark:text-slate-300">Roles</label>
-            <div className="mb-1.5 flex gap-1.5">
-              <ModeButton active={roleMode === "all"} onClick={() => setRoleMode("all")}>All</ModeButton>
-              <ModeButton active={roleMode === "specific"} onClick={() => setRoleMode("specific")}>Specific</ModeButton>
-            </div>
-            {roleMode === "specific" && (
-              <div className="max-h-[140px] overflow-auto rounded-md border border-slate-200 dark:border-slate-800">
-                {roles.length === 0 && <p className="p-2 text-[12px] text-slate-400">No roles.</p>}
-                {roles.map((r) => (
-                  <label key={r.id} className="flex items-center gap-2 border-b border-slate-100 px-2.5 py-1.5 text-[13px] last:border-b-0 dark:border-slate-800">
-                    <input type="checkbox" checked={roleSelected.includes(r.name)} onChange={() => setRoleSelected((prev) => toggleIn(prev, r.name))} />
-                    {r.name}
-                  </label>
-                ))}
-              </div>
-            )}
-          </div>
+          <ScopePicker
+            label="Connections"
+            mode={connMode}
+            onMode={setConnMode}
+            items={connections.map((c) => ({ id: c.id, label: c.name, environment: c.environment }))}
+            selected={connSelected}
+            onToggle={(id) => setConnSelected((prev) => toggleIn(prev, id))}
+            listHeight="max-h-[140px]"
+            gap="mb-1.5"
+          />
+          <ScopePicker
+            label="Roles"
+            mode={roleMode}
+            onMode={setRoleMode}
+            items={roles.map((r) => ({ id: r.name, label: r.name }))}
+            selected={roleSelected}
+            onToggle={(name) => setRoleSelected((prev) => toggleIn(prev, name))}
+            listHeight="max-h-[140px]"
+            gap="mb-1.5"
+            hidden={!shared}
+          />
         </div>
         <div>
           <label className="mb-1 block text-[12px] font-medium text-slate-600 dark:text-slate-300">Name (optional)</label>

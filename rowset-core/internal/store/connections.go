@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"database/sql"
-	"strings"
 
 	"github.com/rowsetdev/rowset-studio/rowset-core/internal/domain"
 )
@@ -191,8 +190,6 @@ func (s *Store) DeleteSecret(ctx context.Context, id string) error {
 	_, err := s.db.ExecContext(ctx, "DELETE FROM secrets WHERE id=?", id)
 	return err
 }
-
-func placeholders(count int) string { return strings.TrimRight(strings.Repeat("?,", count), ",") }
 
 // AnySecret returns one stored secret, so a server can check at startup that
 // its encryption key still opens what this database holds.

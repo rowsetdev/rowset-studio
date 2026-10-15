@@ -1,5 +1,7 @@
 package engine
 
+import "strings"
+
 // Capabilities is the single backend authority for controls whose support
 // differs by engine. API handlers still validate independently; Studio uses
 // this map so it never advertises an operation the engine will reject.
@@ -65,4 +67,15 @@ func SupportsScheduledSQL(name string) bool {
 	default:
 		return true
 	}
+}
+
+// PostgresFamily reports whether an engine speaks PostgreSQL's wire protocol,
+// catalogs and statement surface closely enough to be treated as PostgreSQL:
+// PostgreSQL itself and CockroachDB.
+func PostgresFamily(engineName string) bool {
+	switch strings.ToLower(engineName) {
+	case "postgres", "postgresql", "cockroachdb":
+		return true
+	}
+	return false
 }

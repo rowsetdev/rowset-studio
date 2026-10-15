@@ -35,9 +35,10 @@ type backupTarget struct {
 // on one table. Statements that join, use other tables or a WITH clause are
 // not backed up, because the rows they change cannot be selected reliably.
 func backupTargetOf(info sqlguard.Info) (backupTarget, bool) {
-	// A script's token positions point into the statement each came from, not
-	// into the script, so its WHERE cannot be read back out of Raw. Rowset
-	// says a backup was skipped rather than guess at the rows.
+	// A script is read as one statement carrying the riskiest kind and the
+	// union of the flags, so its tokens no longer describe a single WHERE to
+	// read the changed rows with. Rowset says a backup was skipped rather
+	// than guess which statement's rows to save.
 	if info.IsScript {
 		return backupTarget{}, false
 	}
@@ -342,7 +343,7 @@ func restoreLiteral(engineName string, value backupValue) string {
 	case "null":
 		return "NULL"
 	case "bool":
-		if engineName == "postgres" || engineName == "duckdb" {
+		if engine.PostgresFamily(engineName) || engineName == "duckdb" {
 			return strings.ToUpper(value.Value)
 		}
 		if value.Value == "true" {
@@ -352,18 +353,12 @@ func restoreLiteral(engineName string, value backupValue) string {
 	case "num":
 		return value.Value
 	case "bytes":
-		switch engineName {
-		case "mysql", "mariadb":
-			return "X'" + value.Value + "'"
-		case "mssql", "sqlserver":
-			return "0x" + value.Value
-		case "sqlite":
-			return "X'" + value.Value + "'"
-		case "duckdb":
-			return "unhex('" + value.Value + "')"
-		default:
-			return `'\x` + value.Value + `'::bytea`
+		// ::bytea so a restore's literal keeps its type where PostgreSQL
+		// would otherwise read it as text.
+		if engineName == "postgres" || engineName == "cockroachdb" {
+			return hexLiteral(engineName, value.Value) + "::bytea"
 		}
+		return hexLiteral(engineName, value.Value)
 	default:
 		return importLiteral(engineName, value.Value)
 	}
@@ -444,7 +439,9 @@ func (s *Server) captureRowBackup(ctx context.Context, identity domain.Identity,
 	skipped := func(reason string) Annotations { return Annotations{"backupSkipped": reason} }
 	blocked := func(reason string) Annotations { return Annotations{"backupBlocked": reason} }
 	table := qualifiedTable(connection.Engine, plan.schema, plan.table)
-	savepoint := transaction != nil && connection.Engine == "postgres"
+	// CockroachDB speaks PostgreSQL's savepoints too, and without one a
+	// failed backup read would leave the caller's transaction aborted.
+	savepoint := transaction != nil && engine.PostgresFamily(connection.Engine)
 	if savepoint {
 		if _, err := transaction.Execute(ctx, "SAVEPOINT rowset_backup", 0); err != nil {
 			return skipped("the transaction does not allow a backup")
@@ -560,8 +557,17 @@ func (s *Server) discardRowBackup(identity domain.Identity, annotations Annotati
 	}
 }
 
-func (s *Server) openRowBackup(item store.RowBackup) (rowBackupPayload, error) {
-	var payload rowBackupPayload
+// backupEnvelope is what every backup payload carries whatever engine it
+// came from: the record it belongs to and the person it belongs to. Decrypting
+// one is the same work each time, so openBackup does it once for all of them.
+type backupEnvelope interface {
+	envelope() (backupID, userID string)
+}
+
+// openBackup decrypts a backup and checks it against its own record, so a
+// payload cannot be read under another record's or another person's id.
+func openBackup[T backupEnvelope](s *Server, item store.RowBackup) (T, error) {
+	var payload T
 	if s.vault == nil {
 		return payload, errors.New("secret vault unavailable")
 	}
@@ -569,10 +575,19 @@ func (s *Server) openRowBackup(item store.RowBackup) (rowBackupPayload, error) {
 	if err != nil {
 		return payload, err
 	}
-	if err := json.Unmarshal(plain, &payload); err != nil || payload.BackupID != item.ID || payload.UserID != item.UserID {
+	if err := json.Unmarshal(plain, &payload); err != nil {
+		return payload, errors.New("the backup does not belong to this record")
+	}
+	if backupID, userID := payload.envelope(); backupID != item.ID || userID != item.UserID {
 		return payload, errors.New("the backup does not belong to this record")
 	}
 	return payload, nil
+}
+
+func (p rowBackupPayload) envelope() (string, string) { return p.BackupID, p.UserID }
+
+func (s *Server) openRowBackup(item store.RowBackup) (rowBackupPayload, error) {
+	return openBackup[rowBackupPayload](s, item)
 }
 
 func nameSet(names []string) map[string]bool {

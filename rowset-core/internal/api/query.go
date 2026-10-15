@@ -226,6 +226,10 @@ func (s *Server) executeQuery(w http.ResponseWriter, r *http.Request, connection
 			stream, err = s.engines.Query(streamCtx, target, effectiveSQL)
 		}
 		if err != nil {
+			// A write that returns rows - UPDATE ... RETURNING, DELETE ...
+			// OUTPUT - took a backup above, and it changed nothing, so the
+			// saved rows describe a write that never happened.
+			s.discardRowBackup(identity, annotations)
 			s.recordActivity(r, connection.ID, input.SQL, "error", 0, elapsedMilliseconds(executionStarted), normalized, queryHash, auditMeta{decision: "allow", reference: reference, errorMessage: err.Error()})
 			writeStatementError(w, err, effectiveSQL, transaction)
 			return
@@ -265,14 +269,18 @@ func (s *Server) executeQuery(w http.ResponseWriter, r *http.Request, connection
 		}
 		s.discardRowBackup(identity, annotations)
 		s.recordActivity(r, connection.ID, input.SQL, "error", 0, duration, normalized, queryHash, auditMeta{decision: "allow", reference: reference, errorMessage: err.Error()})
-		go s.notifyLongStatement(identity.UserID, connection.Name, input.SQL, 0, time.Duration(duration)*time.Millisecond, err.Error())
+		s.notify(func() {
+			s.notifyLongStatement(identity.UserID, connection.Name, input.SQL, 0, time.Duration(duration)*time.Millisecond, err.Error())
+		})
 		writeStatementError(w, err, effectiveSQL, transaction)
 		return
 	}
 	s.forgetSchemaAfter(info.Kind, connection.ID)
 	rowCount := result.RowsAffected
 	s.recordActivity(r, connection.ID, input.SQL, "success", rowCount, result.DurationMS, normalized, queryHash, auditMeta{decision: "allow", reference: reference, command: true})
-	go s.notifyLongStatement(identity.UserID, connection.Name, input.SQL, rowCount, time.Duration(result.DurationMS)*time.Millisecond, "")
+	s.notify(func() {
+		s.notifyLongStatement(identity.UserID, connection.Name, input.SQL, rowCount, time.Duration(result.DurationMS)*time.Millisecond, "")
+	})
 	response := map[string]any{"columns": []string{}, "rows": [][]any{}, "rowCount": rowCount, "rowsAffected": result.RowsAffected, "durationMs": result.DurationMS, "truncated": false}
 	writeJSON(w, http.StatusOK, annotations.addTo(response))
 }
@@ -367,7 +375,11 @@ func (s *Server) streamQueryResponse(w http.ResponseWriter, r *http.Request, con
 		}
 	}
 	s.recordActivity(r, connection.ID, sql, status, rowCount, stream.DurationMS(), normalized, hash, auditMeta{decision: "allow", reference: reference, errorMessage: errorMessage})
-	go s.notifyLongStatement(identityFromContext(r.Context()).UserID, connection.Name, sql, rowCount, time.Duration(stream.DurationMS())*time.Millisecond, errorMessage)
+	userID := identityFromContext(r.Context()).UserID
+	duration := time.Duration(stream.DurationMS()) * time.Millisecond
+	s.notify(func() {
+		s.notifyLongStatement(userID, connection.Name, sql, rowCount, duration, errorMessage)
+	})
 }
 
 func (s *Server) resolvePolicies(r *http.Request, identity domain.Identity, connection domain.Connection) (map[string]bool, map[string]bool, int, int, error) {

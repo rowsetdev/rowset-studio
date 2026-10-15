@@ -51,10 +51,6 @@ func databaseDiagnostic(err error, sql string) map[string]any {
 	return detail
 }
 
-func writeDatabaseError(w http.ResponseWriter, err error, sql string) {
-	writeJSON(w, http.StatusBadGateway, map[string]any{"error": databaseDiagnostic(err, sql)})
-}
-
 // writeStatementError reports whether a manual transaction survived the
 // failed statement so Studio never offers Commit for work already discarded.
 func writeStatementError(w http.ResponseWriter, err error, sql string, transaction *engine.Transaction) {

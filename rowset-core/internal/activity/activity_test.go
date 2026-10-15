@@ -55,7 +55,6 @@ func TestBufferedHistoryReadsIncludeWhatWasJustQueued(t *testing.T) {
 type slowStore struct {
 	release chan struct{}
 	mu      sync.Mutex
-	direct  int
 	stored  int
 }
 

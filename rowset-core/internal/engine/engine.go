@@ -57,6 +57,9 @@ type RowStream struct {
 	started time.Time
 	release func() error
 	closed  sync.Once
+	// pointers are the scan targets, kept between rows so a large result
+	// allocates one slice per row instead of two.
+	pointers []any
 }
 
 func (s *RowStream) Columns() []string       { return append([]string(nil), s.columns...) }
@@ -89,11 +92,15 @@ func (s *RowStream) NextRaw() ([]any, bool, error) {
 		return nil, false, s.rows.Err()
 	}
 	values := make([]any, len(s.columns))
-	pointers := make([]any, len(s.columns))
-	for index := range values {
-		pointers[index] = &values[index]
+	// The scan targets are reused across rows; only the values they point at
+	// are new, because the caller keeps those.
+	if len(s.pointers) != len(values) {
+		s.pointers = make([]any, len(values))
 	}
-	if err := s.rows.Scan(pointers...); err != nil {
+	for index := range values {
+		s.pointers[index] = &values[index]
+	}
+	if err := s.rows.Scan(s.pointers...); err != nil {
 		return nil, false, err
 	}
 	return values, true, nil
@@ -165,6 +172,7 @@ type Manager struct {
 	closed   bool
 	openPool func(Connection, *ssh.Client) (*sql.DB, error)
 	schemas  schemaCache
+	origins  originCache
 }
 
 type poolOpening struct {
@@ -288,7 +296,7 @@ func (m *Manager) Query(ctx context.Context, connection Connection, query string
 	if err != nil {
 		return nil, err
 	}
-	origins := columnOrigins(ctx, connection, conn, query)
+	origins := m.columnOrigins(ctx, connection, conn, query)
 	rows, err := conn.QueryContext(ctx, query)
 	if err != nil {
 		conn.Close()
@@ -297,6 +305,9 @@ func (m *Manager) Query(ctx context.Context, connection Connection, query string
 	columns, err := rows.Columns()
 	if err != nil {
 		rows.Close()
+		// The stream never gets built, so nothing else will give this
+		// pinned connection back to the pool.
+		conn.Close()
 		return nil, err
 	}
 	return newRowStream(rows, columns, origins, started, conn.Close), nil
@@ -305,6 +316,7 @@ func (m *Manager) Query(ctx context.Context, connection Connection, query string
 type Transaction struct {
 	tx      *sql.Tx
 	conn    *sql.Conn
+	manager *Manager
 	config  Connection
 	cancel  context.CancelFunc
 	finish  sync.Once
@@ -316,6 +328,7 @@ type Transaction struct {
 // objects, prepared/session state, and transactions to survive across commands.
 type Session struct {
 	conn     *sql.Conn
+	manager  *Manager
 	config   Connection
 	tx       *sql.Tx
 	lifetime context.Context
@@ -333,7 +346,7 @@ func (m *Manager) OpenSession(ctx context.Context, connection Connection) (*Sess
 		return nil, err
 	}
 	lifetime, cancel := context.WithCancel(context.Background())
-	return &Session{conn: conn, config: connection, lifetime: lifetime, cancel: cancel}, nil
+	return &Session{conn: conn, manager: m, config: connection, lifetime: lifetime, cancel: cancel}, nil
 }
 
 func (s *Session) Begin(options TransactionOptions) error {
@@ -402,7 +415,7 @@ func (s *Session) Query(ctx context.Context, query string) (*RowStream, error) {
 	if s.tx != nil {
 		rows, err = s.tx.QueryContext(ctx, query)
 	} else {
-		origins = columnOrigins(ctx, s.config, s.conn, query)
+		origins = s.manager.columnOrigins(ctx, s.config, s.conn, query)
 		rows, err = s.conn.QueryContext(ctx, query)
 	}
 	if err != nil {
@@ -502,7 +515,7 @@ func (m *Manager) BeginWithOptions(ctx context.Context, connection Connection, o
 		_ = conn.Close()
 		return nil, err
 	}
-	return &Transaction{tx: tx, conn: conn, config: connection, cancel: cancel, started: time.Now()}, nil
+	return &Transaction{tx: tx, conn: conn, manager: m, config: connection, cancel: cancel, started: time.Now()}, nil
 }
 
 func sqlTransactionOptions(options TransactionOptions) (*sql.TxOptions, error) {
@@ -547,7 +560,7 @@ func (t *Transaction) Execute(ctx context.Context, query string, maxRows int) (R
 func (t *Transaction) Query(ctx context.Context, query string) (*RowStream, error) {
 	started := time.Now()
 	// Origins let Studio edit rows of the result inside the transaction too.
-	origins := columnOrigins(ctx, t.config, t.conn, query)
+	origins := t.manager.columnOrigins(ctx, t.config, t.conn, query)
 	rows, err := t.tx.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
@@ -575,12 +588,29 @@ func newRowStream(rows *sql.Rows, columns []string, origins []domain.ColumnOrigi
 	return &RowStream{rows: rows, columns: columns, types: types, origins: origins, started: started, release: release}
 }
 
-func columnOrigins(ctx context.Context, connection Connection, conn *sql.Conn, query string) []domain.ColumnOrigin {
+// columnOrigins resolves the table and column each result column comes from,
+// which is what lets Studio edit a result's rows. Every engine answers it
+// with a round trip of its own - a prepare, a catalog read, a describe - so
+// the answer is cached per connection and statement text and forgotten with
+// the schema that it describes.
+func (m *Manager) columnOrigins(ctx context.Context, connection Connection, conn *sql.Conn, query string) []domain.ColumnOrigin {
+	key := poolKey(connection) + "\x00" + query
+	if cached, ok := m.origins.get(key); ok {
+		return cached
+	}
+	origins := m.resolveColumnOrigins(ctx, connection, conn, query)
+	if origins != nil {
+		m.origins.put(key, origins)
+	}
+	return origins
+}
+
+func (m *Manager) resolveColumnOrigins(ctx context.Context, connection Connection, conn *sql.Conn, query string) []domain.ColumnOrigin {
 	switch strings.ToLower(connection.Engine) {
 	case "mssql", "sqlserver":
 		return mssqlColumnOrigins(ctx, conn, query)
 	case "mysql", "mariadb":
-		return mysqlColumnOrigins(ctx, connection, query)
+		return m.mysqlColumnOrigins(ctx, connection, query)
 	case "postgres", "postgresql", "cockroachdb":
 	default:
 		return nil
@@ -637,7 +667,13 @@ func columnOrigins(ctx context.Context, connection Connection, conn *sql.Conn, q
 	return origins
 }
 
-func mysqlColumnOrigins(ctx context.Context, connection Connection, query string) []domain.ColumnOrigin {
+// mysqlColumnOrigins asks MySQL to prepare the statement and describe its
+// result, which the database/sql driver does not expose. That needs a
+// connection of its own, and it has to be reached the same way the pool's is:
+// dialing the database's own address would bypass the SSH tunnel the rest of
+// the connection goes through, and on a host only the SSH server can reach it
+// would fail on every statement.
+func (m *Manager) mysqlColumnOrigins(ctx context.Context, connection Connection, query string) []domain.ColumnOrigin {
 	address := net.JoinHostPort(connection.Host, strconv.Itoa(connection.Port))
 	options := make([]mysqlclient.Option, 0, 1)
 	config, err := tlsConfig(connection.TLS, connection.Host)
@@ -650,7 +686,19 @@ func mysqlColumnOrigins(ctx context.Context, connection Connection, query string
 			return nil
 		})
 	}
-	metadataConn, err := mysqlclient.ConnectWithContext(ctx, address, connection.Username, connection.Password, connection.Database, 10*time.Second, options...)
+	dialCtx, cancelDial := context.WithTimeout(ctx, 10*time.Second)
+	defer cancelDial()
+	dial := (&net.Dialer{Timeout: 10 * time.Second}).DialContext
+	if connection.SSH.enabled() {
+		tunnel := m.tunnel(connection)
+		if tunnel == nil {
+			return nil
+		}
+		dial = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return tunnelDial(ctx, tunnel, network, addr)
+		}
+	}
+	metadataConn, err := mysqlclient.ConnectWithDialer(dialCtx, "", address, connection.Username, connection.Password, connection.Database, dial, options...)
 	if err != nil {
 		return nil
 	}
@@ -774,9 +822,11 @@ func readRows(rows *sql.Rows, maxRows int) (Result, error) {
 			}
 		}
 	}
+	// One pointer slice for the whole read: the values have to be fresh per
+	// row because the result keeps them, the pointers into them do not.
+	pointers := make([]any, len(columns))
 	for rows.Next() {
 		values := make([]any, len(columns))
-		pointers := make([]any, len(columns))
 		for index := range values {
 			pointers[index] = &values[index]
 		}

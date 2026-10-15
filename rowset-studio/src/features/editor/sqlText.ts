@@ -169,3 +169,19 @@ export function statementAt(sql: string, offset: number, engine?: string): strin
   const statements = splitStatements(sql, engine);
   return (statements.find((s) => offset >= s.start && offset < s.end) ?? statements.at(-1))?.sql ?? "";
 }
+
+// The words that create, change or remove an object. A statement carrying
+// one of them is why Studio reloads the schema after a run.
+const SCHEMA_KEYWORDS = new Set(["CREATE", "ALTER", "DROP", "TRUNCATE", "RENAME", "COMMENT"]);
+
+/**
+ * True when the SQL really contains a schema-changing keyword. Matching the
+ * text with a regular expression also matched the word inside a string or a
+ * column name, so `SELECT * FROM t WHERE note = 'drop'` reloaded the whole
+ * schema; the keyword has to be a word of the statement itself.
+ */
+export function changesSchema(sql: string, engine?: string): boolean {
+  return sqlTokens(sql, { hashComments: hashComments(engine) }).some(
+    (token) => token.kind === "word" && SCHEMA_KEYWORDS.has(token.text.toUpperCase()),
+  );
+}

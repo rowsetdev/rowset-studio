@@ -19,7 +19,7 @@ import { explainQuery, exportTable, getSchema, listDatabases, runOnConnections, 
 import { runCassandra, runElasticsearch, runMongo, runRedis, type NoSqlRun } from "./nosqlRun";
 import { buildSqlCompletions } from "./sqlCompletions";
 import { useSchema } from "./useEditor";
-import { formatSql, statementAt, splitStatements } from "./sqlText";
+import { changesSchema, formatSql, statementAt, splitStatements } from "./sqlText";
 import { useAuth } from "../../lib/auth";
 import { SchemaActions } from "./schemaActions";
 import { mongoQuery, formatMongoQuery } from "./mongoQuery";
@@ -181,6 +181,13 @@ function EditorWorkspace({ snapshot, initial }: { snapshot: WorkspaceSnapshot; i
   }, [activeTabId]);
   const [bottomHeight, setBottomHeight] = useState(() => Number(localStorage.getItem("rowset.editor.bottom")) || 280);
   const [explorerWidth, setExplorerWidth] = useState(() => Number(localStorage.getItem("rowset.editor.explorerWidth")) || 286);
+  // The panels a drag resizes, and the size the drag is at. Both are written
+  // to directly while the pointer moves; state and localStorage get the
+  // final size when it is released.
+  const bottomPanel = useRef<HTMLDivElement | null>(null);
+  const explorerGrid = useRef<HTMLDivElement | null>(null);
+  const bottomSize = useRef(bottomHeight);
+  const explorerSize = useRef(explorerWidth);
   // Monotonic per-tab run counter: a stale response (tab re-run before the
   // previous request settled) is dropped instead of clobbering the newer one.
   const runSeq = useRef<Record<string, number>>({});
@@ -219,12 +226,25 @@ function EditorWorkspace({ snapshot, initial }: { snapshot: WorkspaceSnapshot; i
   const queryClient = useQueryClient();
 
   useEffect(() => {
+    bottomSize.current = bottomHeight;
     localStorage.setItem("rowset.editor.bottom", String(bottomHeight));
   }, [bottomHeight]);
 
   useEffect(() => {
+    explorerSize.current = explorerWidth;
     localStorage.setItem("rowset.editor.explorerWidth", String(explorerWidth));
   }, [explorerWidth]);
+
+  const resizeBottom = useCallback((delta: number) => {
+    bottomSize.current = Math.min(720, Math.max(120, bottomSize.current + delta));
+    if (bottomPanel.current) bottomPanel.current.style.height = `${bottomSize.current}px`;
+  }, []);
+  const commitBottom = useCallback(() => setBottomHeight(bottomSize.current), []);
+  const resizeExplorer = useCallback((delta: number) => {
+    explorerSize.current = Math.min(560, Math.max(220, explorerSize.current + delta));
+    explorerGrid.current?.style.setProperty("--explorer-width", `${explorerSize.current}px`);
+  }, []);
+  const commitExplorer = useCallback(() => setExplorerWidth(explorerSize.current), []);
 
   useEffect(() => {
     localStorage.setItem("rowset.editor.explorer", explorerOpen ? "expanded" : "collapsed");
@@ -552,7 +572,7 @@ function EditorWorkspace({ snapshot, initial }: { snapshot: WorkspaceSnapshot; i
         });
         lastOutcome.current[tabId] = { status: "success", data: res, message };
         if (tx) setPendingStatements(current => ({ ...current, [tabId]: (current[tabId] ?? 0) + 1 }));
-        if (/\b(create|alter|drop|truncate)\b/i.test(sql)) void queryClient.invalidateQueries({ queryKey: ["schema", connectionId] });
+        if (changesSchema(sql, activeConnection?.engine)) void queryClient.invalidateQueries({ queryKey: ["schema", connectionId] });
         return true;
       })
       .catch(async (err) => {
@@ -859,6 +879,7 @@ function EditorWorkspace({ snapshot, initial }: { snapshot: WorkspaceSnapshot; i
       }
     }}>
     <div
+      ref={explorerGrid}
       className={`grid h-[calc(100vh-1.5rem)] min-h-[620px] ${explorerOpen ? "gap-x-0 lg:grid-cols-[var(--explorer-width)_8px_minmax(0,1fr)]" : "gap-2 lg:grid-cols-[34px_minmax(0,1fr)]"}`}
       style={{ "--explorer-width": `${explorerWidth}px` } as CSSProperties}
     >
@@ -883,8 +904,13 @@ function EditorWorkspace({ snapshot, initial }: { snapshot: WorkspaceSnapshot; i
       )}
 
       {explorerOpen && (
-        <ColumnResizeHandle
-          onResize={(delta) => setExplorerWidth((width) => Math.min(560, Math.max(220, width + delta)))}
+        <DragHandle
+          axis="column"
+          onMove={resizeExplorer}
+          onEnd={commitExplorer}
+          title="Drag to resize explorer"
+          className="group relative hidden cursor-col-resize items-center justify-center bg-transparent lg:flex"
+          bar="h-full w-px rounded-full bg-slate-200 transition group-hover:w-1 group-hover:bg-cyan-400 dark:bg-slate-800"
         />
       )}
 
@@ -1007,9 +1033,16 @@ function EditorWorkspace({ snapshot, initial }: { snapshot: WorkspaceSnapshot; i
             </div>
           </div>
 
-          <ResizeHandle onResize={(delta) => setBottomHeight((h) => Math.min(720, Math.max(120, h + delta)))} />
+          <DragHandle
+            axis="row"
+            onMove={resizeBottom}
+            onEnd={commitBottom}
+            title="Drag to resize results"
+            className="group relative flex h-1.5 shrink-0 cursor-row-resize items-center justify-center bg-slate-100 transition hover:bg-cyan-100 dark:bg-slate-900 dark:hover:bg-cyan-500/20"
+            bar="h-0.5 w-8 rounded-full bg-slate-300 transition group-hover:bg-cyan-500 dark:bg-slate-700"
+          />
 
-          <div className="flex flex-col overflow-hidden" style={{ height: bottomHeight }}>
+          <div ref={bottomPanel} className="flex flex-col overflow-hidden" style={{ height: bottomHeight }}>
           <BottomPanel
               key={activeTabId}
               activeTab={bottomTab}
@@ -1086,64 +1119,38 @@ function EditorWorkspace({ snapshot, initial }: { snapshot: WorkspaceSnapshot; i
   );
 }
 
-function ResizeHandle({ onResize }: { onResize: (delta: number) => void }) {
-  const lastY = useRef(0);
+// One handle for both axes. A drag used to set React state on every pointer
+// move, which re-rendered the whole editor - the result grid with it - at
+// pointer frequency and wrote the new size to localStorage each frame. The
+// size now goes straight onto the panel while dragging and is committed to
+// state once, when the pointer is released.
+function DragHandle({ axis, onMove, onEnd, title, className, bar }: { axis: "row" | "column"; onMove: (delta: number) => void; onEnd: () => void; title: string; className: string; bar: string }) {
+  const last = useRef(0);
   function onPointerDown(e: React.PointerEvent) {
     e.preventDefault();
-    lastY.current = e.clientY;
+    last.current = axis === "row" ? e.clientY : e.clientX;
     document.body.style.userSelect = "none";
-    document.body.style.cursor = "row-resize";
+    document.body.style.cursor = axis === "row" ? "row-resize" : "col-resize";
     const move = (ev: PointerEvent) => {
-      onResize(lastY.current - ev.clientY);
-      lastY.current = ev.clientY;
+      const position = axis === "row" ? ev.clientY : ev.clientX;
+      // The results panel grows as the pointer goes up, the explorer as it
+      // goes right.
+      onMove(axis === "row" ? last.current - position : position - last.current);
+      last.current = position;
     };
     const up = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       document.body.style.userSelect = "";
       document.body.style.cursor = "";
+      onEnd();
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
   }
   return (
-    <div
-      onPointerDown={onPointerDown}
-      className="group relative flex h-1.5 shrink-0 cursor-row-resize items-center justify-center bg-slate-100 transition hover:bg-cyan-100 dark:bg-slate-900 dark:hover:bg-cyan-500/20"
-      title="Drag to resize results"
-    >
-      <span className="h-0.5 w-8 rounded-full bg-slate-300 transition group-hover:bg-cyan-500 dark:bg-slate-700" />
-    </div>
-  );
-}
-
-function ColumnResizeHandle({ onResize }: { onResize: (delta: number) => void }) {
-  const lastX = useRef(0);
-  function onPointerDown(e: React.PointerEvent) {
-    e.preventDefault();
-    lastX.current = e.clientX;
-    document.body.style.userSelect = "none";
-    document.body.style.cursor = "col-resize";
-    const move = (ev: PointerEvent) => {
-      onResize(ev.clientX - lastX.current);
-      lastX.current = ev.clientX;
-    };
-    const up = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-      document.body.style.userSelect = "";
-      document.body.style.cursor = "";
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-  }
-  return (
-    <div
-      onPointerDown={onPointerDown}
-      className="group relative hidden cursor-col-resize items-center justify-center bg-transparent lg:flex"
-      title="Drag to resize explorer"
-    >
-      <span className="h-full w-px rounded-full bg-slate-200 transition group-hover:w-1 group-hover:bg-cyan-400 dark:bg-slate-800" />
+    <div onPointerDown={onPointerDown} className={className} title={title}>
+      <span className={bar} />
     </div>
   );
 }
@@ -1272,6 +1279,10 @@ function BottomPanel({
   }, []);
   const activeResult = results ? Math.min(run.activeResult ?? results.length - 1, results.length - 1) : -1;
   const selected = results && run.status !== "running" ? results[activeResult] : undefined;
+  // One object per statement, not per render: the grid is memoized, and a
+  // fresh editing prop each time would defeat that.
+  const editedSql = selected ? selected.sql : run.sql;
+  const editing = useMemo(() => editingFor(rowEditing, editedSql), [rowEditing, editedSql]);
   const shownRun: TabRunState = selected ? { ...run, status: selected.status, data: selected.data, error: selected.error } : run;
   // The plan tab appears once Explain has produced one, and goes away with
   // the next run.
@@ -1325,7 +1336,7 @@ function BottomPanel({
             {(shownRun.status === "error" || shownRun.status === "pending") && shownRun.error ? (
               <PolicyBanner error={shownRun.error} context={denialContext} />
             ) : shownRun.data ? (
-              <ResultsGrid key={`${run.startedAt}:${activeResult}`} result={shownRun.data} editing={editingFor(rowEditing, selected ? selected.sql : run.sql)} engine={engine} onFilteredCount={reportFilteredCount} />
+              <ResultsGrid key={`${run.startedAt}:${activeResult}`} result={shownRun.data} editing={editing} engine={engine} onFilteredCount={reportFilteredCount} />
             ) : (
               run.status !== "running" && (
                 <EmptyState title="No results yet" text="Run a query to populate the result grid." />

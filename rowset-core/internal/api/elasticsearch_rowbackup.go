@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -61,19 +60,10 @@ func (s *Server) elasticsearchCaptureBackup(ctx context.Context, identity domain
 	return Annotations{"backup": map[string]any{"id": item.ID, "rows": int64(1)}}
 }
 
+func (p elasticsearchRowBackupPayload) envelope() (string, string) { return p.BackupID, p.UserID }
+
 func (s *Server) openElasticsearchRowBackup(item store.RowBackup) (elasticsearchRowBackupPayload, error) {
-	var payload elasticsearchRowBackupPayload
-	if s.vault == nil {
-		return payload, errors.New("secret vault unavailable")
-	}
-	plain, err := s.vault.Decrypt(item.Ciphertext, item.Nonce)
-	if err != nil {
-		return payload, err
-	}
-	if err := json.Unmarshal(plain, &payload); err != nil || payload.BackupID != item.ID || payload.UserID != item.UserID {
-		return payload, errors.New("the backup does not belong to this record")
-	}
-	return payload, nil
+	return openBackup[elasticsearchRowBackupPayload](s, item)
 }
 
 // elasticsearchRestoreScript is restoreSQL's counterpart: for review only,

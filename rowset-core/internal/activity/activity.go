@@ -71,6 +71,11 @@ type Buffered struct {
 	// channel by a request that finished after shutdown began.
 	closing sync.RWMutex
 	closed  bool
+	// shutdown is closed first thing in Close, so a request already waiting
+	// for room stops waiting and writes its record itself. Without it a full
+	// queue could hold shutdown up for the whole enqueue wait, because Close
+	// cannot close the channel while a sender still holds closing.
+	shutdown chan struct{}
 }
 
 // BatchWriter is implemented by a backend that can store many records in
@@ -86,7 +91,7 @@ func NewBuffered(backend Store, capacity int) *Buffered {
 		capacity = 1
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	buffer := &Buffered{backend: backend, queue: make(chan queuedRecord, capacity), done: make(chan struct{}), ctx: ctx, cancel: cancel}
+	buffer := &Buffered{backend: backend, queue: make(chan queuedRecord, capacity), done: make(chan struct{}), shutdown: make(chan struct{}), ctx: ctx, cancel: cancel}
 	go buffer.run()
 	return buffer
 }
@@ -215,6 +220,8 @@ func (b *Buffered) enqueue(record queuedRecord) bool {
 	select {
 	case b.queue <- record:
 		return true
+	case <-b.shutdown:
+		return false
 	case <-timer.C:
 		return false
 	}
@@ -222,6 +229,7 @@ func (b *Buffered) enqueue(record queuedRecord) bool {
 
 func (b *Buffered) Close() {
 	b.once.Do(func() {
+		close(b.shutdown)
 		b.closing.Lock()
 		b.closed = true
 		close(b.queue)
@@ -266,6 +274,11 @@ func (b *Buffered) enqueueBarrier(ctx context.Context, barrier chan struct{}) bo
 	}
 	select {
 	case b.queue <- queuedRecord{flushed: barrier}:
+		return true
+	case <-b.shutdown:
+		// Close drains what is queued before it returns, so waiting for a
+		// barrier behind it would only wait for the same work twice.
+		close(barrier)
 		return true
 	case <-ctx.Done():
 		return false

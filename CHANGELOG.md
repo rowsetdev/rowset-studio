@@ -5,6 +5,73 @@ and `scripts/package-macos.sh` stamp it into Studio (sidebar), the `rowset`
 executable and the macOS app. Every change set bumps the patch version and adds
 an entry here; after x.y.99 the next version is x.(y+1).0.
 
+## 0.1.11 — 2026-10-11
+
+- Fixed: a statement without a WHERE clause ran unguarded when another
+  statement in the same script had one. A script is read as one statement
+  carrying the riskiest kind, and update, insert and delete rank the same, so
+  `UPDATE a SET x=1 WHERE id=1; DELETE FROM b` was judged an update with a
+  WHERE and the delete emptied a table the guardrail would have refused on its
+  own. Every statement's own missing WHERE is now recorded and judged, so the
+  rules against a DELETE, an UPDATE or a SELECT without one apply to each
+  statement of a script.
+- Fixed: result column lineage on MySQL and MariaDB dialed the database
+  directly instead of going through the connection's SSH tunnel, so over a
+  tunnel no result was editable and every statement paid a failed connection
+  attempt first. It now reaches the database the same way the pool does, and
+  a resolved lineage is cached per connection and statement and dropped with
+  the schema it describes - one prepare, catalog read or describe for a
+  statement that is run again rather than one per run, on every engine.
+- Fixed: a query whose columns could not be read left its pinned database
+  connection behind. One connection of the pool was lost for the life of the
+  process each time.
+- Fixed: a MongoDB find or aggregate, a Redis scan and an Elasticsearch
+  search were evaluated as if an administrator had asked for them, so a
+  role-scoped rule and a read-only connection were not applied to document
+  reads the way they are to SQL. All of them now go through the caller's own
+  role, like every write already did.
+- Fixed: a row backup taken inside a manual transaction on CockroachDB was
+  not protected by a savepoint, so a backup read that failed left the
+  caller's transaction aborted.
+- Fixed: a write that returns rows - `UPDATE … RETURNING`, `DELETE … OUTPUT` -
+  kept its row backup when the statement failed, leaving a saved copy of rows
+  nothing had changed.
+- Fixed: a request could use a manual transaction that the idle reaper rolled
+  back in the same moment, because the transaction was only marked in use
+  after its request body had been read. The claim is now taken under the lock
+  the idle check uses, for SQL and MongoDB transactions alike.
+- Fixed: a CSV import wrote binary values into SQLite and DuckDB as the text
+  `'\x…'` instead of bytes. Both now use the engine's own binary literal, the
+  one a row-backup restore already used.
+- Fixed: shutdown could return while a notification or a background loop was
+  still reading the store, which left a half-written database file behind.
+  Close now waits for them.
+- Changed: a command-line assistant (`claude`, `codex`) is offered and
+  accepted only on a personal workspace. On a shared server the command would
+  run on the server, as the server, for whoever asked.
+- Changed: a full queue no longer holds shutdown up for the whole activity
+  enqueue wait; a request waiting for room stops waiting and writes its own
+  record.
+- Performance: listing connections read every connection's nodes and resolved
+  its grant one connection at a time, twice over - a workspace with twenty
+  connections spent dozens of round trips on one listing. Nodes are read once
+  and each grant resolved once.
+- Performance: a result read allocates one slice per row instead of two, and
+  dragging the editor's panel borders no longer re-renders the result grid or
+  writes to local storage on every pointer move. The grid itself only renders
+  when its result changes.
+- Performance: a run reloads the schema when the statement really creates,
+  alters, drops or truncates something; the word inside a string, a quoted
+  name or a comment used to be enough.
+- Fixed: the result grid measured its column widths from the first rows of a
+  streaming result and never again, so columns stayed as wide as that first
+  chunk made them.
+- Internal: one implementation each for decrypting a row backup (five
+  copies), quoting an identifier (two in Go, two in TypeScript), the NoSQL
+  read guard (four), the policy scope picker (two) and the panel drag handle
+  (two). Removed `writeDatabaseError`, `nullable`, `placeholders`,
+  `mongoUpdateQuery` and `mongoDeleteQuery`, none of which had a caller.
+
 ## 0.1.10 — 2026-10-10
 
 - Fixed: a statement held for review and then approved ran without a row

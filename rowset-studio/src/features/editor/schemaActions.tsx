@@ -1,14 +1,9 @@
 import { mongoQuery } from "./mongoQuery";
+import { quoteIdentifier } from "./rowEdits.ts";
 import { createContext } from "react";
 
 export interface SchemaAction { sql: string; connectionId: string; database?: string; append?: boolean }
 export const SchemaActions = createContext<(action: SchemaAction) => void>(() => undefined);
-
-export function quoteIdentifier(engine: string, name: string): string {
-  if (engine === "mysql" || engine === "mariadb") return "`" + name.replace(/`/g, "``") + "`";
-  if (engine === "mssql" || engine === "sqlserver") return "[" + name.replace(/]/g, "]]") + "]";
-  return '"' + name.replace(/"/g, '""') + '"';
-}
 
 export function tableSelect(engine: string, schema: string, name: string, columns: string[] = []): string {
   if (engine === "mongodb") return mongoQuery(name);

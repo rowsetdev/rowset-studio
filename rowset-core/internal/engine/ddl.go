@@ -44,15 +44,18 @@ func (m *Manager) ObjectDDL(ctx context.Context, connection Connection, kind, sc
 }
 
 func qualified(engine, schemaName, name string) string {
-	quoted := quoteObject(engine, name)
+	quoted := QuoteIdentifier(engine, name)
 	if schemaName != "" {
-		quoted = quoteObject(engine, schemaName) + "." + quoted
+		quoted = QuoteIdentifier(engine, schemaName) + "." + quoted
 	}
 	return quoted
 }
 
-func quoteObject(engine, name string) string {
-	switch engine {
+// QuoteIdentifier quotes a schema, table or column name for the engine, the
+// one place that spelling is decided: a second copy of it elsewhere drifted,
+// and a name quoted the wrong way is a statement that does not run.
+func QuoteIdentifier(engineName, name string) string {
+	switch strings.ToLower(engineName) {
 	case "mysql", "mariadb":
 		return "`" + strings.ReplaceAll(name, "`", "``") + "`"
 	case "mssql", "sqlserver":

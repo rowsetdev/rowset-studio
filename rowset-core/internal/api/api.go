@@ -61,10 +61,18 @@ type Server struct {
 	scheduleContext      context.Context
 	stopSchedules        context.CancelFunc
 	scheduleRuns         sync.WaitGroup
-	importMu             sync.Mutex
-	stopRetention        context.CancelFunc
-	stopAuditVerify      context.CancelFunc
-	imports              map[string]*csvUpload
+	// notifications counts the notification goroutines a request leaves
+	// behind, so shutdown waits for them instead of letting one read the
+	// store after it closes.
+	notifications sync.WaitGroup
+	// loops counts the background loops - the reaper, topology, retention,
+	// the audit check, the scheduler - so Close returns only once none of
+	// them can touch the store any more.
+	loops           sync.WaitGroup
+	importMu        sync.Mutex
+	stopRetention   context.CancelFunc
+	stopAuditVerify context.CancelFunc
+	imports         map[string]*csvUpload
 }
 
 func New(cfg config.Config, data *store.Store, issuer *auth.Issuer, logger *slog.Logger) *Server {
@@ -81,21 +89,21 @@ func NewWithActivity(cfg config.Config, data *store.Store, activityStore activit
 	txnContext, cancel := context.WithCancel(context.Background())
 	topologyContext, stopTopology := context.WithCancel(context.Background())
 	server := &Server{config: cfg, store: data, activity: activityStore, issuer: issuer, logger: logger, vault: secretVault, engines: engine.NewManager(), txns: make(map[string]*transactionEntry), mongoTxns: make(map[string]*mongoTxnEntry), stopTransactions: cancel, topologyLocks: make(map[string]*sync.Mutex), stopTopology: stopTopology, rateClients: make(map[string]*rateWindow)}
-	go server.transactionReaper(txnContext)
-	go server.topologyRefresher(topologyContext)
+	server.loop(func() { server.transactionReaper(txnContext) })
+	server.loop(func() { server.topologyRefresher(topologyContext) })
 	retentionContext, stopRetention := context.WithCancel(context.Background())
 	server.stopRetention = stopRetention
 	// The periods are settled here, before the loop starts, so it never reads
 	// configuration another goroutine could still be setting up.
 	auditDays, historyDays := server.retentionPeriods()
-	go server.activityRetention(retentionContext, auditDays, historyDays)
+	server.loop(func() { server.activityRetention(retentionContext, auditDays, historyDays) })
 	auditVerifyContext, stopAuditVerify := context.WithCancel(context.Background())
 	server.stopAuditVerify = stopAuditVerify
-	go server.auditIntegrityCheck(auditVerifyContext)
+	server.loop(func() { server.auditIntegrityCheck(auditVerifyContext) })
 	server.scheduleRunning = map[string]bool{}
 	server.imports = map[string]*csvUpload{}
 	server.scheduleContext, server.stopSchedules = context.WithCancel(context.Background())
-	go server.scheduler(server.scheduleContext)
+	server.loop(func() { server.scheduler(server.scheduleContext) })
 	server.checkEncryptionKey(context.Background())
 	return server
 }
@@ -119,6 +127,27 @@ func (s *Server) checkEncryptionKey(ctx context.Context) {
 			"detail", "connection passwords and saved drafts were encrypted with a different ROWSET_ENC_KEY",
 			"fix", "put the original key back, or set ROWSET_ENC_KEY_PREVIOUS to it and Rowset re-encrypts what it reads")
 	}
+}
+
+// loop runs a background loop and keeps Close waiting for it, so no loop is
+// still inside a store call when the store closes.
+func (s *Server) loop(run func()) {
+	s.loops.Add(1)
+	go func() {
+		defer s.loops.Done()
+		run()
+	}()
+}
+
+// notify runs a notification in the background and keeps shutdown waiting
+// for it. A long statement's Slack message must not hold the response open,
+// but it reads the store, so it must not outlive it either.
+func (s *Server) notify(run func()) {
+	s.notifications.Add(1)
+	go func() {
+		defer s.notifications.Done()
+		run()
+	}()
 }
 
 func (s *Server) Close() error {
@@ -164,6 +193,11 @@ func (s *Server) Close() error {
 	if s.stopAuditVerify != nil {
 		s.stopAuditVerify()
 	}
+	// A notification outlives the request that sent it, and both it and the
+	// background loops read the store, so they finish before the store
+	// closes behind the server.
+	s.notifications.Wait()
+	s.loops.Wait()
 	// Queued activity is written before the store closes behind the server.
 	if closer, ok := s.activity.(interface{ Close() }); ok {
 		closer.Close()

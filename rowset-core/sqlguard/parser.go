@@ -74,8 +74,28 @@ type Info struct {
 	// A caller that rewrites or reads back one statement needs to know it was
 	// handed several.
 	IsScript bool
+	// Unscoped names every kind a script performs without a WHERE. A script
+	// is judged by one kind, so "UPDATE a SET x=1 WHERE id=1; DELETE FROM b"
+	// would otherwise report a WHERE for the update and hide that the delete
+	// empties a table. Nil for a single statement, where Kind and HasWhere
+	// already say it.
+	Unscoped []Kind
 	Raw      string
 	Tokens   []Token
+}
+
+// LacksWhere reports whether the statement performs kind without a WHERE,
+// whether it is one statement or one of several in a script.
+func (i Info) LacksWhere(kind Kind) bool {
+	if i.Kind == kind && !i.HasWhere {
+		return true
+	}
+	for _, unscoped := range i.Unscoped {
+		if unscoped == kind {
+			return true
+		}
+	}
+	return false
 }
 
 type Token struct {
@@ -209,6 +229,29 @@ func mergeScript(dialect Dialect, sql string, statements []string) Info {
 	}
 	if deciding == 0 {
 		merged.HasWhere = false
+	}
+	// Only one kind decides the script, and update, insert and delete are
+	// equally risky, so the deciding kind can hide another one: the delete of
+	// "UPDATE a SET x=1 WHERE id=1; DELETE FROM b" is as unscoped as it would
+	// be on its own. Each statement's own missing WHERE is recorded so the
+	// guardrails judge all of them, not only the one the script is named by.
+	for _, part := range parts {
+		if part.HasWhere || merged.LacksWhere(part.Kind) {
+			continue
+		}
+		switch part.Kind {
+		// An INSERT takes no WHERE, so there is nothing unscoped about it.
+		case Update, Delete:
+		case Select:
+			// A SELECT with no table - "SELECT 1", a function call - has no
+			// row set to scope.
+			if len(part.Tables) == 0 {
+				continue
+			}
+		default:
+			continue
+		}
+		merged.Unscoped = append(merged.Unscoped, part.Kind)
 	}
 	seen := map[TableRef]bool{}
 	for _, part := range parts {

@@ -91,11 +91,13 @@ func (m *Manager) CachedSchema(ctx context.Context, connection Connection, refre
 }
 
 // InvalidateSchema forgets every cached schema of a saved connection, for
-// all of its databases, so the next request reads the catalog again.
+// all of its databases, so the next request reads the catalog again. Column
+// lineage describes the same objects, so it goes with it.
 func (m *Manager) InvalidateSchema(connectionID string) {
 	if connectionID == "" {
 		return
 	}
+	m.origins.forget(connectionID)
 	prefix := connectionID + "|"
 	m.schemas.mu.Lock()
 	defer m.schemas.mu.Unlock()

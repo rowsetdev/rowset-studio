@@ -87,21 +87,31 @@ func (s *Server) mongoBeginTransaction(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]string{"txnId": txnID})
 }
 
-func (s *Server) mongoTransactionEntry(w http.ResponseWriter, r *http.Request, connection domain.Connection) (*mongoTxnEntry, bool) {
+// mongoTransactionEntry finds the caller's transaction and marks it in use,
+// under the same lock the reaper's idle check uses: a transaction claimed
+// here is never rolled back from under the request that claimed it. done
+// releases the claim.
+func (s *Server) mongoTransactionEntry(w http.ResponseWriter, r *http.Request, connection domain.Connection) (item *mongoTxnEntry, done func(), ok bool) {
 	identity := identityFromContext(r.Context())
 	txnID := r.PathValue("txn_id")
 	s.mongoTxnMu.Lock()
-	item := s.mongoTxns[txnID]
+	item = s.mongoTxns[txnID]
 	authorized := item != nil && item.userID == identity.UserID && item.connectionID == connection.ID
 	if authorized {
 		item.lastUsed = time.Now()
+		item.running++
 	}
 	s.mongoTxnMu.Unlock()
 	if !authorized {
 		writeError(w, 404, "TXN_NOT_FOUND", "transaction not found or expired")
-		return nil, false
+		return nil, nil, false
 	}
-	return item, true
+	return item, func() {
+		s.mongoTxnMu.Lock()
+		item.running--
+		item.lastUsed = time.Now()
+		s.mongoTxnMu.Unlock()
+	}, true
 }
 
 func (s *Server) mongoTxnInsert(w http.ResponseWriter, r *http.Request) {
@@ -109,10 +119,11 @@ func (s *Server) mongoTxnInsert(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	item, ok := s.mongoTransactionEntry(w, r, connection)
+	item, done, ok := s.mongoTransactionEntry(w, r, connection)
 	if !ok {
 		return
 	}
+	defer done()
 	var input engine.MongoInsertInput
 	if !decodeJSON(w, r, &input) {
 		return
@@ -127,15 +138,6 @@ func (s *Server) mongoTxnInsert(w http.ResponseWriter, r *http.Request) {
 	if _, allowed := s.nosqlPolicyAllowed(w, r, connection, info, string(raw)); !allowed {
 		return
 	}
-	s.mongoTxnMu.Lock()
-	item.running++
-	s.mongoTxnMu.Unlock()
-	defer func() {
-		s.mongoTxnMu.Lock()
-		item.running--
-		item.lastUsed = time.Now()
-		s.mongoTxnMu.Unlock()
-	}()
 	item.mu.Lock()
 	defer item.mu.Unlock()
 	started := time.Now()
@@ -155,10 +157,11 @@ func (s *Server) mongoTxnUpdate(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	item, ok := s.mongoTransactionEntry(w, r, connection)
+	item, done, ok := s.mongoTransactionEntry(w, r, connection)
 	if !ok {
 		return
 	}
+	defer done()
 	identity := identityFromContext(r.Context())
 	var input struct {
 		engine.MongoUpdateInput
@@ -182,15 +185,6 @@ func (s *Server) mongoTxnUpdate(w http.ResponseWriter, r *http.Request) {
 	if _, allowed := s.nosqlPolicyAllowed(w, r, connection, info, string(raw)); !allowed {
 		return
 	}
-	s.mongoTxnMu.Lock()
-	item.running++
-	s.mongoTxnMu.Unlock()
-	defer func() {
-		s.mongoTxnMu.Lock()
-		item.running--
-		item.lastUsed = time.Now()
-		s.mongoTxnMu.Unlock()
-	}()
 	item.mu.Lock()
 	defer item.mu.Unlock()
 	var backupAnnotations Annotations
@@ -219,10 +213,11 @@ func (s *Server) mongoTxnDelete(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	item, ok := s.mongoTransactionEntry(w, r, connection)
+	item, done, ok := s.mongoTransactionEntry(w, r, connection)
 	if !ok {
 		return
 	}
+	defer done()
 	identity := identityFromContext(r.Context())
 	var input struct {
 		engine.MongoDeleteInput
@@ -246,15 +241,6 @@ func (s *Server) mongoTxnDelete(w http.ResponseWriter, r *http.Request) {
 	if _, allowed := s.nosqlPolicyAllowed(w, r, connection, info, string(raw)); !allowed {
 		return
 	}
-	s.mongoTxnMu.Lock()
-	item.running++
-	s.mongoTxnMu.Unlock()
-	defer func() {
-		s.mongoTxnMu.Lock()
-		item.running--
-		item.lastUsed = time.Now()
-		s.mongoTxnMu.Unlock()
-	}()
 	item.mu.Lock()
 	defer item.mu.Unlock()
 	var backupAnnotations Annotations
@@ -289,10 +275,11 @@ func (s *Server) finishMongoTransaction(w http.ResponseWriter, r *http.Request, 
 	if !ok {
 		return
 	}
-	item, ok := s.mongoTransactionEntry(w, r, connection)
+	item, done, ok := s.mongoTransactionEntry(w, r, connection)
 	if !ok {
 		return
 	}
+	defer done()
 	item.mu.Lock()
 	defer item.mu.Unlock()
 	s.mongoTxnMu.Lock()

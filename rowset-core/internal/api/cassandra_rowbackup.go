@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -207,19 +206,10 @@ func (s *Server) cassandraCaptureBackup(ctx context.Context, identity domain.Ide
 	return Annotations{"backup": map[string]any{"id": item.ID, "rows": item.Rows}}
 }
 
+func (p cassandraRowBackupPayload) envelope() (string, string) { return p.BackupID, p.UserID }
+
 func (s *Server) openCassandraRowBackup(item store.RowBackup) (cassandraRowBackupPayload, error) {
-	var payload cassandraRowBackupPayload
-	if s.vault == nil {
-		return payload, errors.New("secret vault unavailable")
-	}
-	plain, err := s.vault.Decrypt(item.Ciphertext, item.Nonce)
-	if err != nil {
-		return payload, err
-	}
-	if err := json.Unmarshal(plain, &payload); err != nil || payload.BackupID != item.ID || payload.UserID != item.UserID {
-		return payload, errors.New("the backup does not belong to this record")
-	}
-	return payload, nil
+	return openBackup[cassandraRowBackupPayload](s, item)
 }
 
 // cassandraRestoreStatements is restorePlan's CQL counterpart: a DELETE is
